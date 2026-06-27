@@ -1,0 +1,9 @@
+node_modules/
+models/
+dist/
+out/
+*.log
+.DS_Store
+.idea/
+test-audio/
+docs/dev-memory/

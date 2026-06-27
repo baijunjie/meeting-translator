@@ -1,0 +1,25 @@
+{
+  "name": "meeting-translator",
+  "version": "0.1.0",
+  "description": "Local real-time meeting transcription for macOS",
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "tsc && node scripts/copy-assets.mjs",
+    "start": "npm run build && electron .",
+    "clean": "rm -rf dist",
+    "download-models": "bash scripts/download-models.sh",
+    "test-pipeline": "npm run build && node dist/test-pipeline.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@huggingface/transformers": "^4.2.0",
+    "electron": "^42.4.0",
+    "sherpa-onnx-node": "^1.13.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.0"
+  }
+}
