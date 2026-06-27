@@ -42,10 +42,8 @@ export async function loadSettings(): Promise<AppSettings> {
   applyLocale(s.nativeLang);
   applyFontSize(s.fontSize);
   applyTheme(s.theme);
-  // 翻译开启则提前预热模型（首次会下载），让"未就绪"进度条尽早出现
-  if (s.translation.enabled) {
-    window.api.setTranslateEnabled(true);
-  }
+  // 不在启动时主动预热翻译模型：否则每次打开都要把缓存模型重新载入内存、弹"加载中"。
+  // 改为用到才载（开翻译开关 / 第一句要翻译时）。
   return s;
 }
 

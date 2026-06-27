@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { computed } from 'vue';
-import { NButton, NSwitch, NProgress } from 'naive-ui';
-import { Settings, Trash2, Sun, Moon, Monitor, LoaderCircle, TriangleAlert } from '@lucide/vue';
+import { computed, ref, h } from 'vue';
+import { NButton, NSwitch, NProgress, NModal, NInput, NDropdown } from 'naive-ui';
+import { Settings, Trash2, Archive, Library, Eraser, Sun, Moon, Monitor, LoaderCircle, TriangleAlert } from '@lucide/vue';
 import { useI18n } from 'vue-i18n';
 import { settings, setTranslateEnabled, themePref, cycleTheme } from '../composables/useSettings';
 import {
@@ -13,13 +13,62 @@ import {
   toggleRecording,
   clearTranscript,
   translationLoading,
+  translationDownloading,
   translationProgress,
   translationError,
 } from '../composables/useTranscription';
 import TranscriptList from '../components/TranscriptList.vue';
+import { fmtDateTime } from '../utils/datetime';
 
 const { t } = useI18n();
-defineEmits<{ 'open-settings': [] }>();
+defineEmits<{ 'open-settings': []; 'open-archive': [] }>();
+
+const hasContent = computed(() => lines.length > 0 || !!partial.value);
+
+// 清屏按钮：点击弹下拉，选择归档或删除
+const clearOptions = computed(() => [
+  { key: 'archive', label: t('main.archive'), icon: () => h(Archive, { size: 16 }) },
+  { key: 'delete', label: t('archive.delete'), icon: () => h(Trash2, { size: 16 }) },
+]);
+
+function onClearSelect(key: string): void {
+  if (key === 'delete') {
+    clearTranscript();
+  } else {
+    void openArchiveModal();
+  }
+}
+
+const archiveModalOpen = ref(false);
+const archiveName = ref('');
+
+function defaultArchiveName(): string {
+  return fmtDateTime(Date.now());
+}
+
+async function openArchiveModal(): Promise<void> {
+  // 生成不与现有重复的默认名
+  let name = defaultArchiveName();
+  try {
+    const names = new Set((await window.api.listArchives()).map((a) => a.name));
+    if (names.has(name)) {
+      let i = 2;
+      while (names.has(`${name} (${i})`)) i += 1;
+      name = `${name} (${i})`;
+    }
+  } catch {
+    /* 取不到列表就用默认名 */
+  }
+  archiveName.value = name;
+  archiveModalOpen.value = true;
+}
+
+async function confirmArchive(): Promise<void> {
+  const snapshot = lines.map((l) => ({ time: l.time, text: l.text, translation: l.translation }));
+  await window.api.saveArchive(archiveName.value.trim() || defaultArchiveName(), snapshot);
+  clearTranscript();
+  archiveModalOpen.value = false;
+}
 
 const translateOn = computed<boolean>({
   get: () => settings.value?.translation.enabled ?? false,
@@ -30,14 +79,9 @@ const themeIcon = computed(() =>
   themePref.value === 'light' ? Sun : themePref.value === 'dark' ? Moon : Monitor
 );
 
-// 软件未就绪：加载 ASR 或下载翻译模型时
-const preparing = computed(() => modelLoading.value || translationLoading.value);
-const prepPercent = computed<number | null>(() =>
-  translationLoading.value ? translationProgress.value : null
-);
-const prepLabel = computed(() =>
-  translationLoading.value ? t('status.transLoading') : t('status.loadingModel')
-);
+// 仅 ASR 模型加载属于"软件未就绪"：显示进度条并禁用录音。
+// 翻译模型加载/下载是可选项，只在翻译开关旁提示，不挡录音。
+const preparing = computed(() => modelLoading.value);
 </script>
 
 <template>
@@ -52,8 +96,16 @@ const prepLabel = computed(() =>
 
       <label class="flex items-center gap-2 text-[13px] text-neutral-500 dark:text-neutral-400">
         <span>{{ t('main.translate') }}</span>
+        <span
+          v-if="translationLoading"
+          class="inline-flex items-center gap-1 text-xs tabular-nums"
+          :title="translationDownloading ? t('status.transDownloading') : t('status.transLoading')"
+        >
+          <LoaderCircle :size="13" class="animate-spin" />
+          <span v-if="translationDownloading">{{ translationProgress }}%</span>
+        </span>
         <TriangleAlert
-          v-if="translationError"
+          v-else-if="translationError"
           :size="14"
           class="text-red-500"
           :title="t('status.transFailed')"
@@ -64,14 +116,18 @@ const prepLabel = computed(() =>
       <n-button quaternary circle :title="t('main.theme')" @click="cycleTheme">
         <template #icon><component :is="themeIcon" :size="18" /></template>
       </n-button>
-      <n-button
-        quaternary
-        circle
-        :title="t('main.clear')"
-        :disabled="lines.length === 0 && !partial"
-        @click="clearTranscript"
+      <n-dropdown
+        trigger="click"
+        :options="clearOptions"
+        :disabled="!hasContent"
+        @select="onClearSelect"
       >
-        <template #icon><Trash2 :size="18" /></template>
+        <n-button quaternary circle :title="t('main.clear')" :disabled="!hasContent">
+          <template #icon><Eraser :size="18" /></template>
+        </n-button>
+      </n-dropdown>
+      <n-button quaternary circle :title="t('main.viewArchives')" @click="$emit('open-archive')">
+        <template #icon><Library :size="18" /></template>
       </n-button>
       <n-button quaternary circle :title="t('main.settings')" @click="$emit('open-settings')">
         <template #icon><Settings :size="18" /></template>
@@ -81,22 +137,39 @@ const prepLabel = computed(() =>
       </n-button>
     </header>
 
-    <!-- 软件未就绪：明显的加载/下载进度条，期间禁用录音 -->
+    <!-- ASR 模型加载中：显示进度条并禁用录音 -->
     <div v-if="preparing" class="border-b border-neutral-200 px-5 py-3 dark:border-[#3a3b44]">
       <div class="mb-1.5 flex items-center gap-2 text-xs text-neutral-500 dark:text-neutral-400">
         <LoaderCircle :size="14" class="animate-spin" />
-        <span>{{ prepLabel }}</span>
-        <span v-if="prepPercent !== null" class="ml-auto tabular-nums">{{ prepPercent }}%</span>
+        <span>{{ t('status.loadingModel') }}</span>
       </div>
-      <n-progress
-        type="line"
-        :percentage="prepPercent ?? 0"
-        :show-indicator="false"
-        :height="6"
-        :processing="prepPercent === null"
-      />
+      <n-progress type="line" :percentage="0" :show-indicator="false" :height="6" :processing="true" />
     </div>
 
-    <transcript-list :lines="lines" :partial="partial" :empty-hint="t('main.emptyHint')" />
+    <transcript-list
+      :lines="lines"
+      :partial="partial"
+      :recording="recording"
+      :empty-hint="t('main.emptyHint')"
+      :listening-hint="t('main.listening')"
+      :translate-on="translateOn"
+    />
+
+    <!-- 归档命名弹窗 -->
+    <n-modal
+      v-model:show="archiveModalOpen"
+      preset="card"
+      :title="t('archive.modalTitle')"
+      style="width: 420px; max-width: 90vw"
+    >
+      <div class="mb-1.5 text-xs text-neutral-500 dark:text-neutral-400">{{ t('archive.nameLabel') }}</div>
+      <n-input v-model:value="archiveName" autofocus @keydown.enter="confirmArchive" />
+      <template #footer>
+        <div class="flex justify-end gap-2">
+          <n-button @click="archiveModalOpen = false">{{ t('archive.cancel') }}</n-button>
+          <n-button type="primary" @click="confirmArchive">{{ t('archive.save') }}</n-button>
+        </div>
+      </template>
+    </n-modal>
   </div>
 </template>

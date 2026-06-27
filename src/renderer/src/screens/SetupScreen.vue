@@ -7,25 +7,20 @@ import { useI18n } from 'vue-i18n';
 const { t } = useI18n();
 const emit = defineEmits<{ done: [] }>();
 
-const phase = ref<'downloading' | 'extracting'>('downloading');
 const loaded = ref(0);
 const total = ref(0);
 const failed = ref(false);
 
 const percent = computed(() => (total.value > 0 ? Math.round((loaded.value / total.value) * 100) : 0));
-const indeterminate = computed(() => phase.value === 'extracting' || total.value === 0);
+const indeterminate = computed(() => total.value === 0);
 
 window.api.onSetupProgress((p) => {
-  phase.value = p.phase;
-  if (p.phase === 'downloading') {
-    loaded.value = p.loaded ?? 0;
-    total.value = p.total ?? 0;
-  }
+  loaded.value = p.loaded;
+  total.value = p.total;
 });
 
 async function start(): Promise<void> {
   failed.value = false;
-  phase.value = 'downloading';
   loaded.value = 0;
   total.value = 0;
   const res = await window.api.downloadAsrModels();
@@ -50,7 +45,7 @@ onMounted(start);
           class="mb-2 flex items-center justify-center gap-2 text-xs text-neutral-500 dark:text-neutral-400"
         >
           <LoaderCircle :size="14" class="animate-spin" />
-          <span>{{ phase === 'extracting' ? t('setup.extracting') : t('setup.downloading') }}</span>
+          <span>{{ t('setup.downloading') }}</span>
           <span v-if="!indeterminate" class="tabular-nums">{{ percent }}%</span>
         </div>
         <n-progress

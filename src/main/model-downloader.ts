@@ -59,7 +59,7 @@ export async function downloadAsrModels(
 
   // 大文件带进度
   await downloadFile(`${HF_BASE}/model.int8.onnx`, path.join(svDir, 'model.int8.onnx'), (loaded, total) => {
-    onProgress({ phase: 'downloading', loaded, total });
+    onProgress({ loaded, total });
   });
 
   if (!asrModelsReady(modelsDir)) {

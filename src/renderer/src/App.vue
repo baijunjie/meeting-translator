@@ -5,9 +5,10 @@ import Onboarding from './screens/Onboarding.vue';
 import SetupScreen from './screens/SetupScreen.vue';
 import MainScreen from './screens/MainScreen.vue';
 import SettingsScreen from './screens/SettingsScreen.vue';
+import ArchiveScreen from './screens/ArchiveScreen.vue';
 import { loadSettings, isDark } from './composables/useSettings';
 
-type Screen = 'loading' | 'onboarding' | 'setup' | 'main' | 'settings';
+type Screen = 'loading' | 'onboarding' | 'setup' | 'main' | 'settings' | 'archive';
 const screen = ref<Screen>('loading');
 
 const naiveTheme = computed(() => (isDark.value ? darkTheme : lightTheme));
@@ -33,8 +34,13 @@ onMounted(async () => {
     <div class="h-screen overflow-hidden bg-white text-neutral-900 dark:bg-[#1e1f24] dark:text-neutral-100">
       <onboarding v-if="screen === 'onboarding'" @done="afterOnboarded" />
       <setup-screen v-else-if="screen === 'setup'" @done="screen = 'main'" />
-      <main-screen v-else-if="screen === 'main'" @open-settings="screen = 'settings'" />
+      <main-screen
+        v-else-if="screen === 'main'"
+        @open-settings="screen = 'settings'"
+        @open-archive="screen = 'archive'"
+      />
       <settings-screen v-else-if="screen === 'settings'" @close="screen = 'main'" />
+      <archive-screen v-else-if="screen === 'archive'" @close="screen = 'main'" />
     </div>
   </n-config-provider>
 </template>

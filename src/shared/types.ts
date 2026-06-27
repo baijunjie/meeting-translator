@@ -42,6 +42,18 @@ export interface TranslationStatusPayload {
   error?: string;
 }
 
+/** ASR 子进程(utilityProcess) ←→ 主进程 的消息协议 */
+export type MainToAsr =
+  | { type: 'init'; modelsDir: string }
+  | { type: 'audio'; samples: Float32Array }
+  | { type: 'flush' };
+
+export type AsrToMain =
+  | { type: 'ready' }
+  | { type: 'segment'; payload: SegmentPayload }
+  | { type: 'partial'; payload: PartialPayload }
+  | { type: 'error'; message: string };
+
 /** 首次启动下载 ASR 模型的状态 */
 export interface SetupStatus {
   asrReady: boolean;
@@ -49,11 +61,10 @@ export interface SetupStatus {
 
 /** ASR 模型下载进度 */
 export interface SetupProgress {
-  phase: 'downloading' | 'extracting';
-  /** 已下载字节（downloading 阶段） */
-  loaded?: number;
-  /** 总字节（downloading 阶段） */
-  total?: number;
+  /** 已下载字节 */
+  loaded: number;
+  /** 总字节 */
+  total: number;
 }
 
 /** OpenAI 兼容云端翻译配置 */
@@ -82,6 +93,30 @@ export type UiLang = 'zh' | 'ja' | 'en' | 'ko';
 /** 主题偏好：浅色 / 深色 / 跟随系统 */
 export type ThemePref = 'light' | 'dark' | 'system';
 
+/** 归档里的一行对话 */
+export interface ArchiveLine {
+  time: string;
+  text: string;
+  translation: string;
+}
+
+/** 一条完整归档记录（持久化） */
+export interface ArchiveRecord {
+  id: string;
+  name: string;
+  createdAt: number;
+  lines: ArchiveLine[];
+}
+
+/** 归档列表项（不含完整内容，仅摘要） */
+export interface ArchiveSummary {
+  id: string;
+  name: string;
+  createdAt: number;
+  /** 最后一条对话的原文，列表里弱色小字显示 */
+  lastLine: string;
+}
+
 /** 持久化到本地（electron userData）的应用设置 */
 export interface AppSettings {
   /** 是否已完成首次语言引导 */
@@ -107,6 +142,11 @@ export interface MeetingApi {
   getSetupStatus(): Promise<SetupStatus>;
   /** 下载 ASR 模型，返回结果（失败带 error，供重试） */
   downloadAsrModels(): Promise<{ ok: boolean; error?: string }>;
+  /** 归档：保存一次对话，返回更新后的列表 */
+  saveArchive(name: string, lines: ArchiveLine[]): Promise<ArchiveSummary[]>;
+  listArchives(): Promise<ArchiveSummary[]>;
+  getArchive(id: string): Promise<ArchiveRecord | null>;
+  deleteArchive(id: string): Promise<ArchiveSummary[]>;
   onSetupProgress(cb: (progress: SetupProgress) => void): void;
   onSegment(cb: (segment: SegmentPayload) => void): void;
   onPartial(cb: (partial: PartialPayload) => void): void;

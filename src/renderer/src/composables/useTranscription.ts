@@ -1,4 +1,5 @@
 import { reactive, ref } from 'vue';
+import { fmtClock } from '../utils/datetime';
 
 export interface TranscriptLine {
   id: number;
@@ -16,15 +17,18 @@ export const modelLoading = ref(false);
 // 录音/管线错误（原始文案）
 export const errorText = ref('');
 
-// 翻译模型状态（独立，顶部进度条 / 开关旁错误提示）
+// 翻译模型状态（独立，显示在翻译开关旁，不影响录音）
 export const translationLoading = ref(false);
+export const translationDownloading = ref(false); // true=首次下载(有进度)，false=载入内存
 export const translationProgress = ref(0); // 0~100
 export const translationError = ref(false);
 
-function fmtTime(seconds: number): string {
-  const m = Math.floor(seconds / 60);
-  const s = Math.floor(seconds % 60);
-  return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+// 录音开始时的本地时刻（epoch ms），用于把片段的相对偏移换算成本地时钟时间
+let recordStartEpoch = 0;
+
+// 把片段相对录音起点的偏移（秒）换算成本地时钟时间 HH:MM:SS
+function fmtTime(offsetSeconds: number): string {
+  return fmtClock(recordStartEpoch + offsetSeconds * 1000);
 }
 
 let audioContext: AudioContext | null = null;
@@ -65,15 +69,18 @@ function register(): void {
     if (s.state === 'loading') {
       translationLoading.value = true;
       translationError.value = false;
+      // 有进度=正在下载文件；无进度=从缓存载入内存
       if (typeof s.progress === 'number') {
+        translationDownloading.value = true;
         translationProgress.value = Math.round(s.progress * 100);
       }
     } else if (s.state === 'error') {
       translationLoading.value = false;
+      translationDownloading.value = false;
       translationError.value = true;
     } else if (s.state === 'ready') {
       translationLoading.value = false;
-      translationError.value = false;
+      translationDownloading.value = false;
     }
   });
 }
@@ -81,6 +88,7 @@ register();
 
 export async function startRecording(): Promise<void> {
   errorText.value = '';
+  recordStartEpoch = Date.now();
   const result = await window.api.startPipeline();
   if (!result.ok) {
     errorText.value = result.error ?? 'Error';
