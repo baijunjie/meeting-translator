@@ -30,10 +30,11 @@
 
 ```bash
 npm install
-npm run download-models   # 下载约 230MB 到 models/
 npm run dev               # 开发（热更新）
 # 生产预览：npm run build && npm start
 ```
+
+首次启动时应用会自行下载 ASR 模型（有下载页）；翻译模型在首次使用时下载。
 
 其他脚本：`npm run build`、`npm run type-check`、`npm run clean`。
 
@@ -50,9 +51,9 @@ npm run test-translate              # 多向翻译（首次会下载模型）
 
 | 模型 | 用途 | 大小 | 获取 |
 |---|---|---|---|
-| Silero VAD | 语音活动检测 | 629KB | `npm run download-models` |
-| SenseVoice (int8) | 多语言语音识别 | 约 230MB | `npm run download-models` |
-| M2M100-418M (int8) | 多语言翻译 | 约 630MB | 首次翻译时自动下载到 `models/transformers/` |
+| Silero VAD | 语音活动检测 | 629KB | 首次启动自动下载 |
+| SenseVoice (int8) | 多语言语音识别 | 约 230MB | 首次启动自动下载 |
+| M2M100-418M (int8) | 多语言翻译 | 约 630MB | 首次使用翻译时自动下载 |
 
 ## 技术架构
 

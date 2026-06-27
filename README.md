@@ -30,10 +30,11 @@ Built with **electron-vite** (Vite + Vue 3 + Naive UI). Main/preload/renderer al
 
 ```bash
 npm install
-npm run download-models   # ~230MB into models/
 npm run dev               # dev with hot reload
 # production preview: npm run build && npm start
 ```
+
+On first launch the app downloads the ASR models itself (a setup screen); translation downloads on first use.
 
 Other scripts: `npm run build`, `npm run type-check`, `npm run clean`.
 
@@ -50,9 +51,9 @@ npm run test-translate              # multi-direction translation (downloads mod
 
 | Model | Purpose | Size | How |
 |---|---|---|---|
-| Silero VAD | voice activity detection | 629KB | `npm run download-models` |
-| SenseVoice (int8) | multilingual ASR | ~230MB | `npm run download-models` |
-| M2M100-418M (int8) | multilingual translation | ~630MB | auto-downloaded to `models/transformers/` on first translation |
+| Silero VAD | voice activity detection | 629KB | auto-downloaded on first launch |
+| SenseVoice (int8) | multilingual ASR | ~230MB | auto-downloaded on first launch |
+| M2M100-418M (int8) | multilingual translation | ~630MB | auto-downloaded on first use of translation |
 
 ## Architecture
 

@@ -30,10 +30,11 @@
 
 ```bash
 npm install
-npm run download-models   # 약 230MB를 models/로
 npm run dev               # 개발(핫 리로드)
 # 프로덕션 미리보기: npm run build && npm start
 ```
+
+첫 실행 시 앱이 ASR 모델을 자동으로 다운로드합니다(설치 화면). 번역 모델은 최초 사용 시 다운로드됩니다.
 
 기타 스크립트: `npm run build`, `npm run type-check`, `npm run clean`.
 
@@ -50,9 +51,9 @@ npm run test-translate              # 다방향 번역(최초 실행 시 모델 
 
 | 모델 | 용도 | 크기 | 받기 |
 |---|---|---|---|
-| Silero VAD | 음성 구간 감지 | 629KB | `npm run download-models` |
-| SenseVoice (int8) | 다국어 음성 인식 | 약 230MB | `npm run download-models` |
-| M2M100-418M (int8) | 다국어 번역 | 약 630MB | 최초 번역 시 `models/transformers/`로 자동 다운로드 |
+| Silero VAD | 음성 구간 감지 | 629KB | 첫 실행 시 자동 다운로드 |
+| SenseVoice (int8) | 다국어 음성 인식 | 약 230MB | 첫 실행 시 자동 다운로드 |
+| M2M100-418M (int8) | 다국어 번역 | 약 630MB | 번역 최초 사용 시 자동 다운로드 |
 
 ## 아키텍처
 
