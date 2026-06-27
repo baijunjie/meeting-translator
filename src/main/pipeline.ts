@@ -8,14 +8,19 @@ const VAD_WINDOW_SIZE = 512;
 
 const SENSE_VOICE_DIR = 'sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17';
 
-// 历史缓冲上限（秒），用于段前回补和实时部分识别
-const MAX_HISTORY_SECONDS = 30;
+// 历史缓冲上限（秒），用于段前回补、实时部分识别、兜底断句的能量搜索。
+const MAX_HISTORY_SECONDS = 60;
 
-// 连续说话强制断句的时长上限（秒）。注意：sherpa-onnx-node 1.13.3 的 silero VAD
-// 原生 maxSpeechDuration 不生效（实测连续说话不会被切分），所以这里自己实现：
-// 单段未闭合语音一旦超过该时长就强制定稿，避免长段迟迟不出结果、且长音频一次性
-// 解码时 SenseVoice 容易丢内容。
-const MAX_SEGMENT_SECONDS = 8;
+// 断句主依据：连续静音达到该时长就断句。isDetected() 是逐帧瞬时状态，词间/换气会瞬间
+// 转 false，用它去抖：值偏小 = 断句更勤、定稿/翻译更快；过小会把一句切碎。
+const MIN_SILENCE_SECONDS = 0.35;
+
+// 兜底断句：连续说话一直没有自然停顿（如极快语速）时，段会无限增长、迟迟不定稿。
+// 不在固定时刻硬切，而是在最近一段音频里找“能量最低点”（词间微停顿）作为切点，
+// 尽量不切在半词上。SOFT 上限触发搜索；搜索只看最近 SEARCH 秒；切点前至少保留 MIN 秒。
+const MAX_SEGMENT_SECONDS = 7;
+const SPLIT_SEARCH_SECONDS = 2;
+const MIN_SEGMENT_SECONDS = 4;
 
 // 说话过程中每隔这么久就对当前未结束的语音做一次部分识别，让文字实时出现（最小间隔）
 const PARTIAL_INTERVAL_SECONDS = 0.6;
@@ -140,6 +145,7 @@ export class TranscriptionPipeline {
   // 切段 / 部分识别状态
   private speechActive = false; // 当前是否处于一段语音中
   private segStart = 0; // 当前未闭合语音段的起始采样（含句首回看）
+  private speechEnd = 0; // 最近一次检测到语音的采样位置（用于静音去抖与段尾）
   private partialFloor = 0; // 已最终确定的音频边界，部分识别不回看到此之前
   private lastPartialAt = 0; // 上次做部分识别时的 totalSamples
   private partialGap = Math.round(PARTIAL_INTERVAL_SECONDS * SAMPLE_RATE); // 自适应间隔（采样）
@@ -156,10 +162,7 @@ export class TranscriptionPipeline {
           // 偏低的阈值让 VAD 更早进入语音状态，减少句首被截断
           threshold: 0.35,
           minSpeechDuration: 0.25,
-          minSilenceDuration: 0.6,
-          // 注意：该版本原生 maxSpeechDuration 不生效，连续说话的强制断句改由
-          // 管线用 MAX_SEGMENT_SECONDS 自行实现（见 updateSpeech）
-          maxSpeechDuration: MAX_SEGMENT_SECONDS,
+          minSilenceDuration: MIN_SILENCE_SECONDS,
           windowSize: VAD_WINDOW_SIZE,
         },
         sampleRate: SAMPLE_RATE,
@@ -254,37 +257,60 @@ export class TranscriptionPipeline {
   /**
    * 基于 VAD 的 isDetected() 自行切段：
    * - 静音→语音：开一段（起点向前回看，弥补 VAD 确认偏晚导致的句首截字）
-   * - 语音中超过 MAX_SEGMENT_SECONDS：强制定稿，继续作为新段（VAD 原生上限不生效）
-   * - 语音→静音：定稿当前段
+   * - 语音→静音并持续 MIN_SILENCE_SECONDS：定稿当前段（段尾取最后有语音处）
+   * - 一直无自然停顿且段超过 MAX_SEGMENT_SECONDS：在最近音频的能量最低点兜底断句
    * 段内周期性做部分识别，文字实时出现。
    */
   private updateSpeech(): void {
     const detected = this.vad.isDetected();
 
-    if (detected && !this.speechActive) {
-      this.speechActive = true;
-      const lookback = Math.round(PARTIAL_LOOKBACK_SECONDS * SAMPLE_RATE);
-      this.segStart = Math.max(this.partialFloor, this.totalSamples - lookback);
-      this.lastPartialAt = 0;
-      this.partialGap = Math.round(PARTIAL_INTERVAL_SECONDS * SAMPLE_RATE);
-    }
+    if (detected) {
+      if (!this.speechActive) {
+        this.speechActive = true;
+        const lookback = Math.round(PARTIAL_LOOKBACK_SECONDS * SAMPLE_RATE);
+        this.segStart = Math.max(this.partialFloor, this.totalSamples - lookback);
+        this.lastPartialAt = 0;
+        this.partialGap = Math.round(PARTIAL_INTERVAL_SECONDS * SAMPLE_RATE);
+      }
+      this.speechEnd = this.totalSamples;
 
-    if (this.speechActive && this.totalSamples - this.segStart >= MAX_SEGMENT_SECONDS * SAMPLE_RATE) {
-      // 连续说话超上限：先把已累积的吐成一段，再从当前点续接新段
-      this.finalizeSegment(this.segStart, this.totalSamples);
-      this.segStart = this.totalSamples;
-    }
-
-    if (!detected && this.speechActive) {
-      this.speechActive = false;
-      this.finalizeSegment(this.segStart, this.totalSamples);
-      this.onPartial({ text: '' });
-      return;
-    }
-
-    if (this.speechActive) {
+      // 兜底：无自然停顿导致段过长时，在最近一段里找能量最低点切，尽量切在词间而非半词
+      if (this.totalSamples - this.segStart >= MAX_SEGMENT_SECONDS * SAMPLE_RATE) {
+        const earliest = this.segStart + Math.round(MIN_SEGMENT_SECONDS * SAMPLE_RATE);
+        const from = Math.max(earliest, this.totalSamples - Math.round(SPLIT_SEARCH_SECONDS * SAMPLE_RATE));
+        const cut = this.quietestPoint(from, this.totalSamples);
+        this.finalizeSegment(this.segStart, cut);
+        this.segStart = cut;
+      }
       this.maybePartial();
+    } else if (this.speechActive) {
+      // 静音去抖：连续静音达到 MIN_SILENCE_SECONDS 才断句（段尾取最后有语音处，
+      // 不含尾随静音）。词间/换气的瞬时 false 不会触发，避免一句被切成碎片。
+      if (this.totalSamples - this.speechEnd >= MIN_SILENCE_SECONDS * SAMPLE_RATE) {
+        this.speechActive = false;
+        this.finalizeSegment(this.segStart, this.speechEnd);
+        this.onPartial({ text: '' });
+      }
     }
+  }
+
+  /** 在历史缓冲 [from, to) 内找能量最低的 100ms 窗口，返回其中心采样位置（作为切点） */
+  private quietestPoint(from: number, to: number): number {
+    const win = Math.round(0.1 * SAMPLE_RATE);
+    if (to - from <= win) return to;
+    const audio = this.historySlice(from, to);
+    const hop = Math.round(win / 2);
+    let bestOffset = 0;
+    let bestEnergy = Infinity;
+    for (let i = 0; i + win <= audio.length; i += hop) {
+      let e = 0;
+      for (let k = 0; k < win; k++) e += audio[i + k] * audio[i + k];
+      if (e < bestEnergy) {
+        bestEnergy = e;
+        bestOffset = i;
+      }
+    }
+    return from + bestOffset + Math.floor(win / 2);
   }
 
   /** 段内周期性部分识别（自适应降频 + 回看窗口封顶） */
@@ -316,8 +342,9 @@ export class TranscriptionPipeline {
 
     const audio = this.historySlice(from, to);
     const result = this.transcribe(audio);
-    if (!result.text) {
-      return; // 纯噪音段
+    // 跳过空段，以及只有标点/符号、没有任何文字数字的段（短噪音常被识别成「。」）
+    if (!result.text || !/[\p{L}\p{N}]/u.test(result.text)) {
+      return;
     }
 
     this.onSegment({
