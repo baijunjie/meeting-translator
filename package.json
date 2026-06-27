@@ -22,6 +22,7 @@
   "dependencies": {
     "@huggingface/transformers": "^4.2.0",
     "@lucide/vue": "^1.21.0",
+    "chinese-conv": "^4.0.0",
     "electron": "^42.4.0",
     "naive-ui": "^2.44.1",
     "sherpa-onnx-node": "^1.13.2",

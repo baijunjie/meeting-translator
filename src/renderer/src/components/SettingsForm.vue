@@ -1,12 +1,18 @@
 <script lang="ts">
-import type { UiLang, FontSize, ThemePref, CloudTranslationConfig } from '@shared/types';
+import type {
+  UiLang,
+  FontSize,
+  ThemePref,
+  CloudTranslationConfig,
+  TranslationEngine,
+} from '@shared/types';
 
 /** 设置表单的数据形状（设置页与首次引导向导共用） */
 export interface SettingsFormData {
   nativeLang: UiLang;
   fontSize: FontSize;
   theme: ThemePref;
-  engine: 'local' | 'cloud';
+  engine: TranslationEngine;
   cloud: CloudTranslationConfig;
 }
 </script>
@@ -21,11 +27,13 @@ const { t } = useI18n();
 // 父组件持有 reactive 表单对象，子组件直接通过 v-model 修改其字段
 const props = defineProps<{ form: SettingsFormData }>();
 
+// 按语言 key 字母序排列
 const langOptions = [
-  { label: '中文', value: 'zh' },
-  { label: '日本語', value: 'ja' },
   { label: 'English', value: 'en' },
+  { label: '日本語', value: 'ja' },
   { label: '한국어', value: 'ko' },
+  { label: '简体中文', value: 'zh' },
+  { label: '繁體中文', value: 'zh-Hant' },
 ];
 const fontOptions = computed(() => [
   { label: t('settings.fontSmall'), value: 'small' },
@@ -38,7 +46,8 @@ const themeOptions = computed(() => [
   { label: t('main.themeSystem'), value: 'system' },
 ]);
 const engineOptions = computed(() => [
-  { label: t('settings.engineLocal'), value: 'local' },
+  { label: t('settings.engineM2m100'), value: 'm2m100' },
+  { label: t('settings.engineNllb'), value: 'nllb' },
   { label: t('settings.engineCloud'), value: 'cloud' },
 ]);
 

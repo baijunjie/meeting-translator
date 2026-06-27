@@ -1,0 +1,87 @@
+// 翻译子进程（Electron utilityProcess，完整 Node）。
+// 把翻译模型(transformers.js + onnxruntime-node)隔离到独立进程：原生崩溃、超大内存
+// 分配（如 NLLB 反量化的 ~1GB 分配在主进程会被 Chromium 分配器直接 abort）都被隔离在
+// 这里，翻译进程即便挂掉也不连累主窗口，主进程会在下次翻译时自动重启它。
+import { createTranslator, type Translator, type TranslateProgress } from './translator';
+import type {
+  MainToTranslate,
+  TranslateToMain,
+  TranslationEngine,
+  CloudTranslationConfig,
+} from '../../shared/types';
+
+const parentPort = process.parentPort;
+
+let translator: Translator | null = null;
+let ready: Promise<void> | null = null;
+let config: { engine: TranslationEngine; cloud: CloudTranslationConfig; cacheDir: string } | null = null;
+
+function post(msg: TranslateToMain): void {
+  parentPort.postMessage(msg);
+}
+
+function build(): Translator {
+  if (!config) {
+    throw new Error('翻译器未配置');
+  }
+  if (config.engine === 'cloud') {
+    return createTranslator({ backend: 'cloud', cloud: config.cloud });
+  }
+  return createTranslator({ backend: config.engine, cacheDir: config.cacheDir });
+}
+
+/** 懒加载翻译器，并把加载/下载进度报回主进程；重复调用幂等 */
+function ensure(): Promise<Translator> {
+  if (!translator) {
+    translator = build();
+  }
+  const instance = translator;
+  if (!ready) {
+    post({ type: 'status', payload: { state: 'loading' } });
+    // 模型由多个文件组成，按总字节聚合进度，避免逐文件来回跳
+    const fileBytes = new Map<string, { loaded: number; total: number }>();
+    ready = instance
+      .init((p: TranslateProgress) => {
+        if (p.file && typeof p.loaded === 'number' && typeof p.total === 'number' && p.total > 0) {
+          fileBytes.set(p.file, { loaded: p.loaded, total: p.total });
+          let loaded = 0;
+          let total = 0;
+          for (const f of fileBytes.values()) {
+            loaded += f.loaded;
+            total += f.total;
+          }
+          post({ type: 'status', payload: { state: 'loading', progress: loaded / total } });
+        }
+      })
+      .then(() => post({ type: 'status', payload: { state: 'ready' } }))
+      .catch((err) => {
+        ready = null; // 允许下次重试
+        post({ type: 'status', payload: { state: 'error', error: (err as Error).message } });
+        throw err;
+      });
+  }
+  return ready.then(() => instance);
+}
+
+parentPort.on('message', (e: { data: MainToTranslate }) => {
+  const msg = e.data;
+  switch (msg.type) {
+    case 'configure':
+      // 配置变更：丢弃旧翻译器，下次按新配置重建
+      config = { engine: msg.engine, cloud: msg.cloud, cacheDir: msg.cacheDir };
+      translator = null;
+      ready = null;
+      break;
+    case 'preheat':
+      ensure().catch(() => {});
+      break;
+    case 'translate':
+      ensure()
+        .then((t) => t.translate(msg.text, { source: msg.source, target: msg.target }))
+        .then((text) => post({ type: 'result', id: msg.id, text }))
+        .catch((err) =>
+          post({ type: 'status', payload: { state: 'error', error: (err as Error).message } })
+        );
+      break;
+  }
+});

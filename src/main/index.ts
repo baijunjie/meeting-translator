@@ -1,16 +1,17 @@
 import path from 'node:path';
 import { app, BrowserWindow, ipcMain, systemPreferences, utilityProcess, type UtilityProcess } from 'electron';
-import { createTranslator, type Translator } from './translation/translator';
 import { loadSettings, saveSettings } from './settings';
 import { asrModelsReady, downloadAsrModels } from './model-downloader';
 import { listArchives, getArchive, saveArchive, deleteArchive } from './archives';
 import asrWorkerPath from './asr-process?modulePath';
+import translateWorkerPath from './translation/translate-process?modulePath';
 import type {
   StartResult,
   AppSettings,
   SegmentPayload,
   SetupStatus,
   AsrToMain,
+  TranslateToMain,
   ArchiveLine,
 } from '../shared/types';
 
@@ -23,8 +24,9 @@ let win: BrowserWindow | null = null;
 let asrChild: UtilityProcess | null = null;
 let asrReady: Promise<void> | null = null;
 
-let translator: Translator | null = null;
-let translatorReady: Promise<void> | null = null;
+// 翻译跑在独立的 utilityProcess 子进程：隔离原生崩溃与超大内存分配（如 NLLB 反量化
+// 在主进程会被 Chromium 分配器 abort），翻译进程挂掉也不连累主窗口，仅丢一次翻译
+let translateChild: UtilityProcess | null = null;
 
 // 应用图标（dev 下 Dock 显示 Electron 默认图标，需手动设置）
 const APP_ICON = path.join(app.getAppPath(), 'build', 'icon.png');
@@ -54,52 +56,43 @@ function sendToRenderer(channel: string, payload: unknown): void {
   }
 }
 
-/** 按当前设置创建翻译器实例 */
-function buildTranslator(): Translator {
+/** 启动翻译子进程并按当前设置初始化 */
+function startTranslateChild(): UtilityProcess {
+  const child = utilityProcess.fork(translateWorkerPath);
+  translateChild = child;
+  child.on('message', (m: TranslateToMain) => {
+    if (m.type === 'status') {
+      sendToRenderer('translation:status', m.payload);
+    } else if (m.type === 'result') {
+      sendToRenderer('pipeline:translation', { id: m.id, text: m.text });
+    }
+  });
+  child.on('exit', (code) => {
+    translateChild = null;
+    if (code !== 0) {
+      // 翻译进程异常退出（如模型内存过大崩溃）：主进程存活，提示失败，下次翻译自动重启
+      sendToRenderer('translation:status', { state: 'error', error: `翻译进程异常退出 (${code})` });
+    }
+  });
   const t = loadSettings().translation;
-  if (t.engine === 'cloud') {
-    return createTranslator({ backend: 'cloud', cloud: t.cloud });
-  }
-  return createTranslator({ backend: 'm2m100', cacheDir: TRANSLATION_CACHE_DIR });
+  child.postMessage({
+    type: 'configure',
+    engine: t.engine,
+    cloud: t.cloud,
+    cacheDir: TRANSLATION_CACHE_DIR,
+  });
+  return child;
 }
 
-/** 设置变更后丢弃现有翻译器，下次按新配置重建 */
-function resetTranslator(): void {
-  translator = null;
-  translatorReady = null;
+/** 确保翻译子进程已就绪（懒启动 + 复用） */
+function ensureTranslateChild(): UtilityProcess {
+  return translateChild ?? startTranslateChild();
 }
 
-/** 懒加载翻译器，本地模型首次会联网下载并把进度报给渲染层。返回就绪的实例 */
-function ensureTranslator(): Promise<Translator> {
-  if (!translator) {
-    translator = buildTranslator();
-  }
-  const instance = translator; // 固定本次实例，期间即便 resetTranslator 也不受影响
-  if (!translatorReady) {
-    sendToRenderer('translation:status', { state: 'loading' });
-    // 模型由多个文件组成，按总字节聚合进度，避免逐文件来回跳
-    const fileBytes = new Map<string, { loaded: number; total: number }>();
-    translatorReady = instance
-      .init((p) => {
-        if (p.file && typeof p.loaded === 'number' && typeof p.total === 'number' && p.total > 0) {
-          fileBytes.set(p.file, { loaded: p.loaded, total: p.total });
-          let loaded = 0;
-          let total = 0;
-          for (const f of fileBytes.values()) {
-            loaded += f.loaded;
-            total += f.total;
-          }
-          sendToRenderer('translation:status', { state: 'loading', progress: loaded / total });
-        }
-      })
-      .then(() => sendToRenderer('translation:status', { state: 'ready' }))
-      .catch((err) => {
-        translatorReady = null; // 允许下次重试
-        sendToRenderer('translation:status', { state: 'error', error: (err as Error).message });
-        throw err;
-      });
-  }
-  return translatorReady.then(() => instance);
+/** 设置变更后让翻译子进程按新配置重建（kill 后下次按需重启） */
+function reconfigureTranslate(): void {
+  translateChild?.kill(); // exit 回调会清空引用
+  translateChild = null;
 }
 
 /** 对一条定稿段做翻译（fire-and-forget），失败不影响转写。目标恒为母语 */
@@ -108,14 +101,13 @@ function translateSegment(segment: SegmentPayload): void {
   if (!settings.translation.enabled) {
     return;
   }
-  const target = settings.nativeLang;
-  ensureTranslator()
-    .then((t) => t.translate(segment.text, { source: segment.lang, target }))
-    .then((text) => sendToRenderer('pipeline:translation', { id: segment.id, text }))
-    .catch((err) => {
-      console.error('翻译失败:', (err as Error).message);
-      sendToRenderer('translation:status', { state: 'error', error: (err as Error).message });
-    });
+  ensureTranslateChild().postMessage({
+    type: 'translate',
+    id: segment.id,
+    text: segment.text,
+    source: segment.lang,
+    target: settings.nativeLang,
+  });
 }
 
 /** 启动 ASR 子进程并完成初始化（含模型加载 + 预热），resolve 表示就绪 */
@@ -220,7 +212,7 @@ ipcMain.on('translation:set-enabled', (_event, enabled: boolean) => {
   saveSettings(settings);
   // 开启时提前预热翻译器，避免第一句卡顿
   if (enabled) {
-    ensureTranslator().catch(() => {});
+    ensureTranslateChild().postMessage({ type: 'preheat' });
   }
 });
 
@@ -246,9 +238,9 @@ ipcMain.handle('settings:save', (_event, next: AppSettings): AppSettings => {
 
   const saved = saveSettings(next);
   if (engineChanged) {
-    resetTranslator();
+    reconfigureTranslate();
     if (saved.translation.enabled) {
-      ensureTranslator().catch(() => {});
+      ensureTranslateChild().postMessage({ type: 'preheat' });
     }
   }
   return saved;
@@ -270,5 +262,6 @@ app.whenReady().then(() => {
 
 app.on('window-all-closed', () => {
   asrChild?.kill();
+  translateChild?.kill();
   app.quit();
 });

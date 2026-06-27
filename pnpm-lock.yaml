@@ -14,6 +14,9 @@ importers:
       '@lucide/vue':
         specifier: ^1.21.0
         version: 1.21.0(vue@3.5.39(typescript@5.9.3))
+      chinese-conv:
+        specifier: ^4.0.0
+        version: 4.0.0
       electron:
         specifier: ^42.4.0
         version: 42.5.0
@@ -1031,6 +1034,10 @@ packages:
 
   caniuse-lite@1.0.30001799:
     resolution: {integrity: sha512-hG1bReV+OUU+MOqK4t/ZWI0tZOyz3rqS9XuhOUz1cIcbwBKjOyJEJuw9ER5JuNyqxNk8u/JUVbGibBOL1yrjFw==}
+
+  chinese-conv@4.0.0:
+    resolution: {integrity: sha512-PVBMzvv6CtX1cubaDXfxYscIdbOAHPuY/E2vnfJIzOACX+xIW4NRKRlNsZVI2p5KxGsXyUp7tVHfvQlqZ4yx/w==}
+    engines: {node: ^20.19.0 || >=22.12.0}
 
   convert-source-map@2.0.0:
     resolution: {integrity: sha512-Kvp459HrV2FEJ1CAsi1Ku+MY3kasH19TFykTz2xWmMeq6bk2NU3XXvfJ+Q61m0xktWwt+1HSYf3JZsTms3aRJg==}
@@ -2295,6 +2302,8 @@ snapshots:
   cac@6.7.14: {}
 
   caniuse-lite@1.0.30001799: {}
+
+  chinese-conv@4.0.0: {}
 
   convert-source-map@2.0.0: {}
 

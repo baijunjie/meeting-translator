@@ -5,10 +5,10 @@ import path from 'node:path';
 import { app } from 'electron';
 import type { AppSettings, UiLang } from '../shared/types';
 
-const UI_LANGS: UiLang[] = ['zh', 'ja', 'en', 'ko'];
+const UI_LANGS: UiLang[] = ['zh', 'zh-Hant', 'ja', 'en', 'ko'];
 
 function defaultNativeLang(): UiLang {
-  // 按系统语言猜母语，落到我们支持的 4 种之一，否则英语。
+  // 按系统语言猜母语，落到我们支持的语言之一，否则英语。
   // 优先用系统偏好语言（getLocale 返回的是 Chromium/应用语言，开发环境常为 en-US）。
   const candidates = [
     ...(app.getPreferredSystemLanguages?.() ?? []),
@@ -16,7 +16,11 @@ function defaultNativeLang(): UiLang {
     app.getLocale(),
   ].map((l) => (l || '').toLowerCase());
   for (const c of candidates) {
-    const hit = UI_LANGS.find((l) => c.startsWith(l));
+    if (c.startsWith('zh')) {
+      // 繁体地区/脚本（台/港/澳、Hant）→ 繁體；其余中文 → 简体
+      return /hant|tw|hk|mo/.test(c) ? 'zh-Hant' : 'zh';
+    }
+    const hit = (['ja', 'en', 'ko'] as UiLang[]).find((l) => c.startsWith(l));
     if (hit) return hit;
   }
   return 'en';
@@ -30,7 +34,7 @@ function makeDefaults(): AppSettings {
     theme: 'system',
     translation: {
       enabled: false,
-      engine: 'local',
+      engine: 'm2m100',
       cloud: {
         baseURL: 'https://api.openai.com/v1',
         apiKey: '',
@@ -75,7 +79,8 @@ function withDefaults(raw: unknown): AppSettings {
       s.theme === 'light' || s.theme === 'dark' ? s.theme : d.theme,
     translation: {
       enabled,
-      engine: t.engine === 'cloud' ? 'cloud' : 'local',
+      // 旧值 'local' 迁移到 'm2m100'
+      engine: t.engine === 'cloud' ? 'cloud' : t.engine === 'nllb' ? 'nllb' : 'm2m100',
       cloud: {
         baseURL: (cloud.baseURL as string) || d.translation.cloud.baseURL,
         apiKey: (cloud.apiKey as string) ?? '',

@@ -54,6 +54,16 @@ export type AsrToMain =
   | { type: 'partial'; payload: PartialPayload }
   | { type: 'error'; message: string };
 
+/** 翻译子进程(utilityProcess) ←→ 主进程 的消息协议 */
+export type MainToTranslate =
+  | { type: 'configure'; engine: TranslationEngine; cloud: CloudTranslationConfig; cacheDir: string }
+  | { type: 'preheat' }
+  | { type: 'translate'; id: number; text: string; source?: string; target: string };
+
+export type TranslateToMain =
+  | { type: 'status'; payload: TranslationStatusPayload }
+  | { type: 'result'; id: number; text: string };
+
 /** 首次启动下载 ASR 模型的状态 */
 export interface SetupStatus {
   asrReady: boolean;
@@ -76,19 +86,23 @@ export interface CloudTranslationConfig {
   model: string;
 }
 
+/** 本地翻译模型：即插即用，新增模型只加一份 spec */
+export type LocalEngine = 'm2m100' | 'nllb';
+/** 翻译引擎：本地模型 + 云端 */
+export type TranslationEngine = LocalEngine | 'cloud';
+
 export interface TranslationSettings {
   /** 是否开启翻译（目标恒为母语 nativeLang） */
   enabled: boolean;
-  /** 'local' = 本地 M2M100；'cloud' = OpenAI 兼容云端 */
-  engine: 'local' | 'cloud';
+  engine: TranslationEngine;
   cloud: CloudTranslationConfig;
 }
 
 /** 主页转写字体大小档位 */
 export type FontSize = 'small' | 'medium' | 'large';
 
-/** 界面/母语语言码（界面文案 + 翻译目标） */
-export type UiLang = 'zh' | 'ja' | 'en' | 'ko';
+/** 界面/母语语言码（界面文案 + 翻译目标）。zh=简体中文，zh-Hant=繁體中文 */
+export type UiLang = 'zh' | 'zh-Hant' | 'ja' | 'en' | 'ko';
 
 /** 主题偏好：浅色 / 深色 / 跟随系统 */
 export type ThemePref = 'light' | 'dark' | 'system';
