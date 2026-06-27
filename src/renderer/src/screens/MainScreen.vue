@@ -23,7 +23,8 @@ import { fmtDateTime } from '../utils/datetime';
 const { t } = useI18n();
 defineEmits<{ 'open-settings': []; 'open-archive': [] }>();
 
-const hasContent = computed(() => lines.length > 0 || !!partial.value);
+// 仅已定稿记录才算"有内容可清"：实时 partial 是瞬时的，清它没意义（归档也只存 lines）
+const hasContent = computed(() => lines.length > 0);
 
 // 清屏按钮：点击弹下拉，选择归档或删除
 const clearOptions = computed(() => [
@@ -116,16 +117,15 @@ const preparing = computed(() => modelLoading.value);
       <n-button quaternary circle :title="t('main.theme')" @click="cycleTheme">
         <template #icon><component :is="themeIcon" :size="18" /></template>
       </n-button>
-      <n-dropdown
-        trigger="click"
-        :options="clearOptions"
-        :disabled="!hasContent"
-        @select="onClearSelect"
-      >
-        <n-button quaternary circle :title="t('main.clear')" :disabled="!hasContent">
+      <!-- NDropdown 无 disabled 属性：无内容时直接渲染禁用按钮，避免空状态仍能弹出菜单 -->
+      <n-dropdown v-if="hasContent" trigger="click" :options="clearOptions" @select="onClearSelect">
+        <n-button quaternary circle :title="t('main.clear')">
           <template #icon><Eraser :size="18" /></template>
         </n-button>
       </n-dropdown>
+      <n-button v-else quaternary circle disabled :title="t('main.clear')">
+        <template #icon><Eraser :size="18" /></template>
+      </n-button>
       <n-button quaternary circle :title="t('main.viewArchives')" @click="$emit('open-archive')">
         <template #icon><Library :size="18" /></template>
       </n-button>
