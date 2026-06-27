@@ -2,7 +2,7 @@
 //   npm run test-pipeline -- <16kHz-mono.wav>
 import path from 'node:path';
 import { readWave } from 'sherpa-onnx-node';
-import { TranscriptionPipeline, SAMPLE_RATE } from '../src/pipeline';
+import { TranscriptionPipeline, SAMPLE_RATE } from '../src/main/pipeline';
 
 const wavPath = process.argv[2];
 if (!wavPath) {

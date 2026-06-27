@@ -3,8 +3,10 @@ import { app, BrowserWindow, ipcMain, systemPreferences } from 'electron';
 import { TranscriptionPipeline } from './pipeline';
 import { createTranslator, type Translator } from './translation/translator';
 import { loadSettings, saveSettings } from './settings';
+import type { StartResult, AppSettings, SegmentPayload } from '../shared/types';
 
-const MODELS_DIR = path.join(__dirname, '..', 'models');
+// 模型在仓库/应用根目录的 models/ 下（electron-vite 下 __dirname 指向 out/main）
+const MODELS_DIR = path.join(app.getAppPath(), 'models');
 const TRANSLATION_CACHE_DIR = path.join(MODELS_DIR, 'transformers');
 
 let win: BrowserWindow | null = null;
@@ -19,11 +21,16 @@ function createWindow(): void {
     height: 760,
     title: 'Meeting Translator',
     webPreferences: {
-      preload: path.join(__dirname, 'preload.js'),
+      preload: path.join(__dirname, '../preload/index.js'),
       contextIsolation: true,
     },
   });
-  win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
+  // 开发用 vite dev server，生产加载打包后的 HTML
+  if (process.env['ELECTRON_RENDERER_URL']) {
+    win.loadURL(process.env['ELECTRON_RENDERER_URL']);
+  } else {
+    win.loadFile(path.join(__dirname, '../renderer/index.html'));
+  }
 }
 
 function sendToRenderer(channel: string, payload: unknown): void {

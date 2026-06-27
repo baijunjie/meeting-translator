@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron';
+import type { MeetingApi } from '../shared/types';
 
 const api: MeetingApi = {
   startPipeline: () => ipcRenderer.invoke('pipeline:start'),

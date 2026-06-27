@@ -2,95 +2,11 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Meeting Translator</title>
-  <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-  <!-- 首次引导：选择语言 -->
-  <div id="onboarding" class="screen hidden">
-    <div class="onboarding-box">
-      <h1 data-i18n="onboarding.title">Welcome</h1>
-      <p data-i18n="onboarding.subtitle">Choose your language</p>
-      <div id="lang-choices" class="lang-choices"></div>
-    </div>
-  </div>
-
-  <!-- 主页面：录音 + 翻译 -->
-  <div id="main-screen" class="screen hidden">
-    <header>
-      <h1 class="brand">Meeting Translator</h1>
-      <div class="controls">
-        <span id="status" class="status" data-i18n="status.ready">Ready</span>
-        <label class="translate-control">
-          <input type="checkbox" id="translate-toggle" />
-          <span data-i18n="main.translate">Translate</span>
-        </label>
-        <button id="settings-btn" class="icon-btn" data-i18n-title="main.settingsTitle" title="Settings">⚙</button>
-        <button id="toggle-btn" data-i18n="main.start">Start Recording</button>
-      </div>
-    </header>
-
-    <main>
-      <section id="transcript-panel">
-        <div id="transcript"></div>
-        <p id="empty-hint" class="hint" data-i18n="main.emptyHint">Results will appear here</p>
-      </section>
-    </main>
-  </div>
-
-  <!-- 设置页面 -->
-  <div id="settings-screen" class="screen hidden">
-    <header>
-      <button id="settings-back" class="icon-btn" title="Back">←</button>
-      <h1 class="brand" data-i18n="settings.title">Settings</h1>
-      <div class="controls">
-        <button id="settings-save" data-i18n="settings.save">Save</button>
-      </div>
-    </header>
-
-    <div class="settings-body">
-      <div class="field">
-        <label data-i18n="settings.nativeLang">Language</label>
-        <select id="native-lang"></select>
-      </div>
-
-      <div class="field">
-        <label data-i18n="settings.fontSize">Font size</label>
-        <select id="font-size">
-          <option value="small" data-i18n="settings.fontSmall">Small</option>
-          <option value="medium" data-i18n="settings.fontMedium">Medium</option>
-          <option value="large" data-i18n="settings.fontLarge">Large</option>
-        </select>
-      </div>
-
-      <div class="field">
-        <label data-i18n="settings.engine">Translation</label>
-        <select id="engine-select">
-          <option value="local" data-i18n="settings.engineLocal">Local</option>
-          <option value="cloud" data-i18n="settings.engineCloud">Cloud</option>
-        </select>
-      </div>
-
-      <div id="cloud-fields">
-        <p class="warn" data-i18n="settings.cloudWarn">Cloud translation sends text to a third party.</p>
-        <div class="field">
-          <label data-i18n="settings.baseUrl">Base URL</label>
-          <input id="cloud-baseurl" type="text" placeholder="https://api.openai.com/v1" />
-        </div>
-        <div class="field">
-          <label data-i18n="settings.apiKey">API Key</label>
-          <input id="cloud-apikey" type="password" placeholder="sk-..." />
-        </div>
-        <div class="field">
-          <label data-i18n="settings.model">Model</label>
-          <input id="cloud-model" type="text" placeholder="gpt-4o-mini" />
-        </div>
-        <p class="hint" data-i18n="settings.cloudHint">The key stays on this device.</p>
-      </div>
-    </div>
-  </div>
-
-  <script src="i18n.js"></script>
-  <script src="renderer.js"></script>
+  <div id="app"></div>
+  <script type="module" src="/src/main.ts"></script>
 </body>
 </html>

@@ -1,7 +1,7 @@
 // 离线验证翻译：多向互译 + 语言码映射（手动冒烟脚本，非自动化测试）
 //   npm run test-translate
 import path from 'node:path';
-import { createTranslator } from '../src/translation/translator';
+import { createTranslator } from '../src/main/translation/translator';
 
 const cases = [
   { text: '今天我们讨论新产品的发布计划。', source: 'zh', target: 'ja' },

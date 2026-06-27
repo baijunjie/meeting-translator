@@ -1,9 +1,13 @@
-// 在音频线程采集 PCM，攒到 2048 样本(128ms@16kHz)再发给主线程，降低消息频率
+// 在音频线程采集 PCM，攒到 2048 样本(128ms@16kHz)再发给主线程，降低消息频率。
+// 作为静态资源原样加载（addModule('audio-worklet.js')），不经过打包。
 class CaptureProcessor extends AudioWorkletProcessor {
-  private readonly buffer = new Float32Array(2048);
-  private offset = 0;
+  constructor() {
+    super();
+    this.buffer = new Float32Array(2048);
+    this.offset = 0;
+  }
 
-  process(inputs: Float32Array[][]): boolean {
+  process(inputs) {
     const channel = inputs[0] && inputs[0][0];
     if (!channel) {
       return true;

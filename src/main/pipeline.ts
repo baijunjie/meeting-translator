@@ -5,6 +5,7 @@ import {
   OfflineRecognizer,
   type SpeechSegment,
 } from 'sherpa-onnx-node';
+import type { SegmentPayload, PartialPayload } from '../shared/types';
 
 export const SAMPLE_RATE = 16000;
 const VAD_WINDOW_SIZE = 512;

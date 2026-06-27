@@ -1,6 +1,7 @@
 // 云端翻译实现：调用任意 OpenAI 兼容的 chat completions 端点。
 // 注意：启用云翻译意味着会议文本会发往第三方，与“本地不出机器”相悖，应作为可选项。
 import type { Translator } from './translator';
+import type { CloudTranslationConfig } from '../../shared/types';
 
 const LANG_NAMES: Record<string, string> = {
   zh: 'Chinese (Simplified)',

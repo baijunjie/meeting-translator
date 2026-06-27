@@ -1,7 +1,7 @@
 // 主进程与渲染进程之间通过 IPC 传递的数据结构，以及暴露给渲染进程的 API。
 
 /** 一条最终确定的转写结果 */
-interface SegmentPayload {
+export interface SegmentPayload {
   /** 段序号，译文异步回来时用它对应到正确的行 */
   id: number;
   text: string;
@@ -14,28 +14,28 @@ interface SegmentPayload {
 }
 
 /** 某条转写段的译文，按 id 对应回原文行 */
-interface TranslationPayload {
+export interface TranslationPayload {
   id: number;
   text: string;
 }
 
 /** 说话过程中实时更新的部分识别结果，text 为空表示清除 */
-interface PartialPayload {
+export interface PartialPayload {
   text: string;
 }
 
-interface StatusPayload {
+export interface StatusPayload {
   state: 'loading' | 'running' | 'error' | 'stopped';
   error?: string;
 }
 
-interface StartResult {
+export interface StartResult {
   ok: boolean;
   error?: string;
 }
 
 /** 翻译模型的加载状态（首次需联网下载约 600MB） */
-interface TranslationStatusPayload {
+export interface TranslationStatusPayload {
   state: 'loading' | 'ready' | 'error';
   /** 0~1 下载进度（若有） */
   progress?: number;
@@ -43,7 +43,7 @@ interface TranslationStatusPayload {
 }
 
 /** OpenAI 兼容云端翻译配置 */
-interface CloudTranslationConfig {
+export interface CloudTranslationConfig {
   /** 形如 https://api.openai.com/v1 */
   baseURL: string;
   apiKey: string;
@@ -51,7 +51,7 @@ interface CloudTranslationConfig {
   model: string;
 }
 
-interface TranslationSettings {
+export interface TranslationSettings {
   /** 是否开启翻译（目标恒为母语 nativeLang） */
   enabled: boolean;
   /** 'local' = 本地 M2M100；'cloud' = OpenAI 兼容云端 */
@@ -60,13 +60,13 @@ interface TranslationSettings {
 }
 
 /** 主页转写字体大小档位 */
-type FontSize = 'small' | 'medium' | 'large';
+export type FontSize = 'small' | 'medium' | 'large';
 
 /** 界面/母语语言码（界面文案 + 翻译目标） */
-type UiLang = 'zh' | 'ja' | 'en' | 'ko';
+export type UiLang = 'zh' | 'ja' | 'en' | 'ko';
 
 /** 持久化到本地（electron userData）的应用设置 */
-interface AppSettings {
+export interface AppSettings {
   /** 是否已完成首次语言引导 */
   onboarded: boolean;
   /** 母语：界面语言 + 翻译目标 */
@@ -76,7 +76,7 @@ interface AppSettings {
 }
 
 /** preload 通过 contextBridge 暴露到渲染进程 window.api 上的接口 */
-interface MeetingApi {
+export interface MeetingApi {
   startPipeline(): Promise<StartResult>;
   stopPipeline(): Promise<{ ok: boolean }>;
   sendAudio(samples: Float32Array): void;
@@ -90,23 +90,3 @@ interface MeetingApi {
   onStatus(cb: (status: StatusPayload) => void): void;
   onTranslationStatus(cb: (status: TranslationStatusPayload) => void): void;
 }
-
-interface Window {
-  api: MeetingApi;
-}
-
-// --- AudioWorklet 运行上下文的全局声明（不在标准 lib.dom 里）---
-declare abstract class AudioWorkletProcessor {
-  readonly port: MessagePort;
-  constructor();
-  process(
-    inputs: Float32Array[][],
-    outputs: Float32Array[][],
-    parameters: Record<string, Float32Array>
-  ): boolean;
-}
-
-declare function registerProcessor(
-  name: string,
-  processorCtor: typeof AudioWorkletProcessor
-): void;

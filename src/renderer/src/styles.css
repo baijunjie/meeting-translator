@@ -1,0 +1,21 @@
+:root {
+  --transcript-size: 15px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: -apple-system, "PingFang SC", "Hiragino Sans", "Apple SD Gothic Neo", sans-serif;
+  background: #1e1f24;
+  color: #e8e8ea;
+  overflow: hidden;
+}

@@ -3,6 +3,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { app } from 'electron';
+import type { AppSettings, UiLang } from '../shared/types';
 
 const UI_LANGS: UiLang[] = ['zh', 'ja', 'en', 'ko'];
 

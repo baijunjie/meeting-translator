@@ -2,6 +2,7 @@
 // 具体用哪个本地模型 / 云 API 由工厂决定，方便以后替换。
 import { M2M100Translator } from './m2m100-translator';
 import { CloudTranslator } from './cloud-translator';
+import type { CloudTranslationConfig } from '../../shared/types';
 
 export interface TranslateProgress {
   /** 如 "downloading" / "loading" / "ready" */
