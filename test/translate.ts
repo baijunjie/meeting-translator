@@ -1,7 +1,7 @@
-// 离线验证翻译：多向互译 + 语言码映射
+// 离线验证翻译：多向互译 + 语言码映射（手动冒烟脚本，非自动化测试）
 //   npm run test-translate
 import path from 'node:path';
-import { createTranslator } from './translation/translator';
+import { createTranslator } from '../src/translation/translator';
 
 const cases = [
   { text: '今天我们讨论新产品的发布计划。', source: 'zh', target: 'ja' },
@@ -12,7 +12,7 @@ const cases = [
 ];
 
 async function main(): Promise<void> {
-  const cacheDir = path.join(__dirname, '..', 'models', 'transformers');
+  const cacheDir = path.join(__dirname, '..', '..', 'models', 'transformers');
   const translator = createTranslator({ backend: 'm2m100', cacheDir });
 
   console.log('加载翻译模型（首次会从 HuggingFace 下载约 630MB）...');

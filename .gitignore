@@ -1,6 +1,7 @@
 node_modules/
 models/
 dist/
+dist-test/
 out/
 *.log
 .DS_Store

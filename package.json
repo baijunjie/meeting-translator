@@ -6,9 +6,10 @@
   "scripts": {
     "build": "tsc && node scripts/copy-assets.mjs",
     "start": "npm run build && electron .",
-    "clean": "rm -rf dist",
+    "clean": "rm -rf dist dist-test",
     "download-models": "bash scripts/download-models.sh",
-    "test-pipeline": "npm run build && node dist/test-pipeline.js"
+    "test-pipeline": "tsc -p tsconfig.test.json && node dist-test/test/pipeline.js",
+    "test-translate": "tsc -p tsconfig.test.json && node dist-test/test/translate.js"
   },
   "keywords": [],
   "author": "",

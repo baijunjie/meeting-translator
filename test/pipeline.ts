@@ -1,8 +1,8 @@
-// 用 WAV 文件离线验证转写管线:
+// 离线验证转写管线（手动冒烟脚本，非自动化测试）:
 //   npm run test-pipeline -- <16kHz-mono.wav>
 import path from 'node:path';
 import { readWave } from 'sherpa-onnx-node';
-import { TranscriptionPipeline, SAMPLE_RATE } from './pipeline';
+import { TranscriptionPipeline, SAMPLE_RATE } from '../src/pipeline';
 
 const wavPath = process.argv[2];
 if (!wavPath) {
@@ -17,7 +17,7 @@ if (wave.sampleRate !== SAMPLE_RATE) {
   process.exit(1);
 }
 
-const modelsDir = path.join(__dirname, '..', 'models');
+const modelsDir = path.join(__dirname, '..', '..', 'models');
 console.log('加载模型...');
 const t0 = Date.now();
 const pipeline = new TranscriptionPipeline(modelsDir, {
