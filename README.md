@@ -1,67 +1,76 @@
 # Meeting Translator
 
-macOS 本地会议转写工具：实时录音转文字，并可本地翻译。所有推理在本地完成，音频与文本不上传任何服务器。
+> Local, real-time meeting transcription & translation for macOS — audio and text never leave your machine.
 
-## 功能
+**English** · [简体中文](README.zh-CN.md) · [日本語](README.ja.md) · [한국어](README.ko.md)
 
-- 实时麦克风录音转写，支持中文 / 日语 / 英语 / 韩语 / 粤语（自动检测）
-- 文字实时上屏：说话过程中即显示部分识别结果，语音段结束后定稿
-- **母语驱动**：首次启动引导选择母语；整个界面用母语呈现（中 / 日 / 英 / 韩），开启翻译后会议中其他语言统一翻成母语
-- 翻译引擎可切换：
-  - **本地**（默认）：M2M100 模型本地运行，首次联网下载后离线可用，文本不出机器
-  - **云端**（可选）：任意 OpenAI 兼容端点（设置里填 Base URL / API Key / 模型，密钥仅存本机）；启用即表示文本会发往第三方
-- 设置页：母语、转写字体大小、翻译方式
-- 纯 CPU 实时运行（Apple Silicon 实测 RTF ≈ 0.03），无需 GPU
+## Features
 
-## 技术架构
+- Real-time microphone transcription: Chinese / Japanese / English / Korean / Cantonese (auto-detected)
+- Live captions — partial results appear while you speak, finalized when the segment ends
+- **Native-language driven** — pick your language on first launch; the whole UI is shown in it, and when translation is on, everything spoken in other languages is translated into your language
+- Switchable translation engine:
+  - **Local** (default): M2M100 runs on-device — downloaded once, then works offline; text never leaves your machine
+  - **Cloud** (optional): any OpenAI-compatible endpoint (set Base URL / API Key / Model in Settings; the key is stored only on your device) — enabling it means text is sent to a third party
+- Settings: native language, transcript font size, translation engine
+- Runs in real time on CPU (RTF ≈ 0.03 on Apple Silicon), no GPU required
 
-```
-渲染进程                          主进程
-麦克风 (getUserMedia)
-  └─ AudioWorklet 采集 16kHz PCM
-       └─ IPC ──────────────────▶ Silero VAD 切分语音段
-                                    └─ SenseVoice 语音识别 (zh/en/ja/ko/yue)
-                                         ├─ 说话中：周期性部分识别（实时上屏）
-                                         └─ 段结束：最终结果
-                                              └─ M2M100 翻译（可插拔，按需）
-       转写 + 译文 ◀───────────── IPC
-```
+## Usage
 
-转写引擎为 [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx)（ONNX Runtime，N-API 原生模块）；翻译用 [Transformers.js](https://github.com/huggingface/transformers.js) 跑 Meta M2M100-418M（MIT），同样基于 onnxruntime。翻译能力封装在 `src/translation/` 的 `Translator` 接口后，换更强的本地模型或接云 API 只需新增一个实现。
+1. **First launch** — choose your language on the onboarding screen.
+2. Click **Start Recording** — captions appear live as you speak.
+3. Toggle **Translate** to show a translation into your language under each line.
+4. Open **Settings** (⚙) to change language, font size, or translation engine (and cloud credentials).
 
-## 开发
+The first time you start recording, macOS asks for microphone permission.
 
-代码使用 TypeScript（`src/`），`tsc` 编译到 `dist/`，`npm start` 会先构建再启动 Electron。
+## Development
+
+Source is TypeScript (`src/`), compiled to `dist/` by `tsc`. `npm start` builds first, then launches Electron.
 
 ```bash
 npm install
-npm run download-models   # 下载约 230MB 模型文件到 models/
+npm run download-models   # ~230MB into models/
 npm start                 # = npm run build + electron .
 ```
 
-首次点击「开始录音」时系统会请求麦克风权限。
+Other scripts: `npm run build`, `npm run clean`.
 
-### 离线验证管线
-
-不启动 GUI，直接用 WAV 文件测试转写：
+### Offline testing (no GUI)
 
 ```bash
-npm run test-pipeline -- test.wav   # 转写，需要 16kHz 单声道
-# 格式转换: afconvert -f WAVE -d LEI16@16000 -c 1 in.wav out.wav
+npm run test-pipeline -- test.wav   # transcription, needs 16kHz mono
+# convert: afconvert -f WAVE -d LEI16@16000 -c 1 in.wav out.wav
 
-npm run test-translate              # 翻译多向互译（首次会下载翻译模型）
+npm run test-translate              # multi-direction translation (downloads model on first run)
 ```
 
-## 模型
+## Models
 
-| 模型 | 用途 | 大小 | 获取 |
+| Model | Purpose | Size | How |
 |---|---|---|---|
-| Silero VAD | 语音活动检测 | 629KB | `npm run download-models` |
-| SenseVoice (int8) | 多语言语音识别 | 约 230MB | `npm run download-models` |
-| M2M100-418M (int8) | 多语言翻译 | 约 630MB | 首次翻译时自动下载到 `models/transformers/` |
+| Silero VAD | voice activity detection | 629KB | `npm run download-models` |
+| SenseVoice (int8) | multilingual ASR | ~230MB | `npm run download-models` |
+| M2M100-418M (int8) | multilingual translation | ~630MB | auto-downloaded to `models/transformers/` on first translation |
+
+## Architecture
+
+```
+Renderer                              Main process
+Microphone (getUserMedia)
+  └─ AudioWorklet → 16kHz PCM
+       └─ IPC ─────────────────────▶ Silero VAD  (segment speech)
+                                        └─ SenseVoice ASR  (zh/en/ja/ko/yue)
+                                             ├─ while speaking → partial decode (live)
+                                             └─ on segment end → final result
+                                                  └─ M2M100 translation (pluggable)
+       transcript + translation ◀──── IPC
+```
+
+Transcription uses [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) (ONNX Runtime, native N-API module); translation uses [Transformers.js](https://github.com/huggingface/transformers.js) running Meta M2M100-418M (MIT), also on onnxruntime. Translation sits behind the `Translator` interface in `src/translation/` — swapping in a stronger local model or a cloud API is just another implementation.
 
 ## Roadmap
 
-- [ ] 更高质量本地翻译（如 Qwen2.5 等 LLM 后端）
-- [ ] 会议记录导出（Markdown / SRT）
-- [ ] 打包分发（electron-builder，模型首次启动下载）
+- [ ] Higher-quality local translation (e.g. an LLM backend like Qwen2.5)
+- [ ] Export transcripts (Markdown / SRT)
+- [ ] Packaging & distribution (electron-builder, models downloaded on first launch)
