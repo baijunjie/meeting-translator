@@ -26,15 +26,16 @@
 
 ## 개발
 
-소스는 TypeScript(`src/`), `tsc`로 `dist/`에 컴파일됩니다. `npm start`는 빌드 후 Electron을 실행합니다.
+**electron-vite**(Vite + Vue 3 + Naive UI)로 구축. 메인 / preload / 렌더러 모두 TypeScript(`src/`).
 
 ```bash
 npm install
 npm run download-models   # 약 230MB를 models/로
-npm start                 # = npm run build + electron .
+npm run dev               # 개발(핫 리로드)
+# 프로덕션 미리보기: npm run build && npm start
 ```
 
-기타 스크립트: `npm run build`, `npm run clean`.
+기타 스크립트: `npm run build`, `npm run type-check`, `npm run clean`.
 
 ### 오프라인 테스트(GUI 불필요)
 

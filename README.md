@@ -26,15 +26,16 @@ The first time you start recording, macOS asks for microphone permission.
 
 ## Development
 
-Source is TypeScript (`src/`), compiled to `dist/` by `tsc`. `npm start` builds first, then launches Electron.
+Built with **electron-vite** (Vite + Vue 3 + Naive UI). Main/preload/renderer all in TypeScript under `src/`.
 
 ```bash
 npm install
 npm run download-models   # ~230MB into models/
-npm start                 # = npm run build + electron .
+npm run dev               # dev with hot reload
+# production preview: npm run build && npm start
 ```
 
-Other scripts: `npm run build`, `npm run clean`.
+Other scripts: `npm run build`, `npm run type-check`, `npm run clean`.
 
 ### Offline testing (no GUI)
 

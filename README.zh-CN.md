@@ -26,15 +26,16 @@
 
 ## 开发
 
-代码为 TypeScript（`src/`），由 `tsc` 编译到 `dist/`。`npm start` 会先构建再启动 Electron。
+基于 **electron-vite**（Vite + Vue 3 + Naive UI）。主进程 / preload / 渲染层均为 TypeScript，位于 `src/`。
 
 ```bash
 npm install
 npm run download-models   # 下载约 230MB 到 models/
-npm start                 # = npm run build + electron .
+npm run dev               # 开发（热更新）
+# 生产预览：npm run build && npm start
 ```
 
-其他脚本：`npm run build`、`npm run clean`。
+其他脚本：`npm run build`、`npm run type-check`、`npm run clean`。
 
 ### 离线测试（无需 GUI）
 
