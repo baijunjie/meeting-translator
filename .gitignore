@@ -8,3 +8,4 @@ out/
 .idea/
 test-audio/
 docs/dev-memory/
+build/icon.icns

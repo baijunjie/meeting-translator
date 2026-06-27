@@ -1,26 +1,40 @@
 import path from 'node:path';
-import { app, BrowserWindow, ipcMain, systemPreferences } from 'electron';
-import { TranscriptionPipeline } from './pipeline';
+import { app, BrowserWindow, ipcMain, systemPreferences, utilityProcess, type UtilityProcess } from 'electron';
 import { createTranslator, type Translator } from './translation/translator';
 import { loadSettings, saveSettings } from './settings';
 import { asrModelsReady, downloadAsrModels } from './model-downloader';
-import type { StartResult, AppSettings, SegmentPayload, SetupStatus } from '../shared/types';
+import { listArchives, getArchive, saveArchive, deleteArchive } from './archives';
+import asrWorkerPath from './asr-process?modulePath';
+import type {
+  StartResult,
+  AppSettings,
+  SegmentPayload,
+  SetupStatus,
+  AsrToMain,
+  ArchiveLine,
+} from '../shared/types';
 
 // 模型在仓库/应用根目录的 models/ 下（electron-vite 下 __dirname 指向 out/main）
 const MODELS_DIR = path.join(app.getAppPath(), 'models');
 const TRANSLATION_CACHE_DIR = path.join(MODELS_DIR, 'transformers');
 
 let win: BrowserWindow | null = null;
-let pipeline: TranscriptionPipeline | null = null;
+// ASR 识别跑在独立的 utilityProcess 子进程，主进程只转发音频、不做推理
+let asrChild: UtilityProcess | null = null;
+let asrReady: Promise<void> | null = null;
 
 let translator: Translator | null = null;
 let translatorReady: Promise<void> | null = null;
+
+// 应用图标（dev 下 Dock 显示 Electron 默认图标，需手动设置）
+const APP_ICON = path.join(app.getAppPath(), 'build', 'icon.png');
 
 function createWindow(): void {
   win = new BrowserWindow({
     width: 1100,
     height: 760,
     title: 'Meeting Translator',
+    icon: APP_ICON,
     webPreferences: {
       preload: path.join(__dirname, '../preload/index.js'),
       contextIsolation: true,
@@ -104,6 +118,60 @@ function translateSegment(segment: SegmentPayload): void {
     });
 }
 
+/** 启动 ASR 子进程并完成初始化（含模型加载 + 预热），resolve 表示就绪 */
+function startAsrChild(): Promise<void> {
+  const child = utilityProcess.fork(asrWorkerPath);
+  asrChild = child;
+
+  return new Promise<void>((resolve, reject) => {
+    let settled = false;
+    child.on('message', (m: AsrToMain) => {
+      switch (m.type) {
+        case 'ready':
+          settled = true;
+          resolve();
+          break;
+        case 'segment':
+          sendToRenderer('pipeline:segment', m.payload); // 原文立即上屏
+          translateSegment(m.payload); // 译文异步回填
+          break;
+        case 'partial':
+          sendToRenderer('pipeline:partial', m.payload);
+          break;
+        case 'error':
+          sendToRenderer('pipeline:status', { state: 'error', error: m.message });
+          if (!settled) {
+            // 初始化阶段就出错：销毁子进程，让 exit 清空引用，下次 start 可重新 fork 恢复
+            settled = true;
+            reject(new Error(m.message));
+            child.kill();
+          }
+          break;
+      }
+    });
+    child.on('exit', (code) => {
+      asrChild = null;
+      asrReady = null;
+      if (code !== 0) {
+        sendToRenderer('pipeline:status', { state: 'error', error: `识别进程异常退出 (${code})` });
+        if (!settled) {
+          settled = true;
+          reject(new Error(`识别进程退出 ${code}`));
+        }
+      }
+    });
+    child.postMessage({ type: 'init', modelsDir: MODELS_DIR });
+  });
+}
+
+/** 确保 ASR 子进程已就绪（懒启动 + 复用） */
+function ensureAsr(): Promise<void> {
+  if (!asrChild) {
+    asrReady = startAsrChild();
+  }
+  return asrReady ?? Promise.resolve();
+}
+
 ipcMain.handle('pipeline:start', async (): Promise<StartResult> => {
   if (process.platform === 'darwin') {
     const granted = await systemPreferences.askForMediaAccess('microphone');
@@ -112,20 +180,11 @@ ipcMain.handle('pipeline:start', async (): Promise<StartResult> => {
     }
   }
 
-  if (!pipeline) {
-    try {
-      sendToRenderer('pipeline:status', { state: 'loading' });
-      pipeline = new TranscriptionPipeline(MODELS_DIR, {
-        onSegment: (segment) => {
-          sendToRenderer('pipeline:segment', segment); // 原文立即上屏
-          translateSegment(segment); // 译文异步回填
-        },
-        onPartial: (partial) => sendToRenderer('pipeline:partial', partial),
-      });
-    } catch (err) {
-      pipeline = null;
-      return { ok: false, error: (err as Error).message };
-    }
+  try {
+    sendToRenderer('pipeline:status', { state: 'loading' });
+    await ensureAsr();
+  } catch (err) {
+    return { ok: false, error: (err as Error).message };
   }
   sendToRenderer('pipeline:status', { state: 'running' });
   return { ok: true };
@@ -143,23 +202,16 @@ ipcMain.handle('setup:download-asr', async (): Promise<{ ok: boolean; error?: st
 });
 
 ipcMain.on('pipeline:audio', (_event, samples: Float32Array) => {
-  if (!pipeline) {
-    return;
-  }
-  try {
-    // IPC 传过来的是类型化数组视图，还原成 Float32Array
-    pipeline.acceptWaveform(
-      new Float32Array(
-        samples.buffer as ArrayBuffer,
-        samples.byteOffset,
-        samples.byteLength / Float32Array.BYTES_PER_ELEMENT
-      )
-    );
-  } catch (err) {
-    // 处理失败时丢弃管线，避免每个音频块都重复抛错
-    pipeline = null;
-    sendToRenderer('pipeline:status', { state: 'error', error: (err as Error).message });
-  }
+  if (!asrChild) return;
+  // IPC 过来的其实是字节视图，必须还原成 Float32Array 再转发，否则子进程会把
+  // 8192 字节当成 8192 个浮点（值为 0-255）→ 音频变噪声、识别全错
+  const f = new Float32Array(
+    samples.buffer as ArrayBuffer,
+    samples.byteOffset,
+    samples.byteLength / Float32Array.BYTES_PER_ELEMENT
+  );
+  // 主进程只转发音频给识别子进程，不做推理
+  asrChild.postMessage({ type: 'audio', samples: f });
 });
 
 ipcMain.on('translation:set-enabled', (_event, enabled: boolean) => {
@@ -171,6 +223,13 @@ ipcMain.on('translation:set-enabled', (_event, enabled: boolean) => {
     ensureTranslator().catch(() => {});
   }
 });
+
+ipcMain.handle('archive:list', () => listArchives());
+ipcMain.handle('archive:get', (_event, id: string) => getArchive(id));
+ipcMain.handle('archive:save', (_event, name: string, lines: ArchiveLine[]) =>
+  saveArchive(name, lines, Date.now())
+);
+ipcMain.handle('archive:delete', (_event, id: string) => deleteArchive(id));
 
 ipcMain.handle('settings:get', (): AppSettings => loadSettings());
 
@@ -196,15 +255,20 @@ ipcMain.handle('settings:save', (_event, next: AppSettings): AppSettings => {
 });
 
 ipcMain.handle('pipeline:stop', () => {
-  if (pipeline) {
-    pipeline.flush();
-  }
+  asrChild?.postMessage({ type: 'flush' });
   sendToRenderer('pipeline:status', { state: 'stopped' });
   return { ok: true };
 });
 
-app.whenReady().then(createWindow);
+app.whenReady().then(() => {
+  // macOS：dev 下 Dock 默认显示 Electron 图标，手动替换为应用图标
+  if (process.platform === 'darwin' && app.dock) {
+    app.dock.setIcon(APP_ICON);
+  }
+  createWindow();
+});
 
 app.on('window-all-closed', () => {
+  asrChild?.kill();
   app.quit();
 });
