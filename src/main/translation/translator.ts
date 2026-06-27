@@ -5,11 +5,16 @@ import { CloudTranslator } from './cloud-translator';
 import type { CloudTranslationConfig } from '../../shared/types';
 
 export interface TranslateProgress {
-  /** 如 "downloading" / "loading" / "ready" */
+  /** 如 "initiate" / "download" / "progress" / "done" / "ready" */
   status: string;
-  /** 0~1，下载进度（若有） */
+  /** 当前文件的百分比（0~100，单文件） */
   progress?: number;
+  /** 正在下载的文件名 */
   file?: string;
+  /** 当前文件已下载字节 */
+  loaded?: number;
+  /** 当前文件总字节 */
+  total?: number;
 }
 
 export interface Translator {

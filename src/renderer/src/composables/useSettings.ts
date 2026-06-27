@@ -1,11 +1,30 @@
-import { ref } from 'vue';
+import { ref, computed } from 'vue';
 import { i18n } from '../i18n';
-import type { AppSettings, FontSize, UiLang } from '@shared/types';
+import type { AppSettings, FontSize, ThemePref, UiLang } from '@shared/types';
 
 const FONT_PX: Record<FontSize, string> = { small: '13px', medium: '15px', large: '18px' };
 
 // 全局单例：整个渲染进程共享同一份设置
 export const settings = ref<AppSettings | null>(null);
+
+// 当前是否深色（供 Naive 的 NConfigProvider 与界面响应式使用）
+export const isDark = ref(false);
+export const themePref = computed<ThemePref>(() => settings.value?.theme ?? 'system');
+
+const darkMql = window.matchMedia('(prefers-color-scheme: dark)');
+
+function applyTheme(pref: ThemePref): void {
+  const dark = pref === 'system' ? darkMql.matches : pref === 'dark';
+  isDark.value = dark;
+  document.documentElement.classList.toggle('dark', dark);
+}
+
+// 跟随系统模式下，系统外观变化时实时更新
+darkMql.addEventListener('change', () => {
+  if (themePref.value === 'system') {
+    applyTheme('system');
+  }
+});
 
 function applyLocale(lang: UiLang): void {
   i18n.global.locale.value = lang;
@@ -16,22 +35,48 @@ export function applyFontSize(size: FontSize): void {
   document.documentElement.style.setProperty('--transcript-size', FONT_PX[size]);
 }
 
-/** 启动时加载设置并应用语言/字体 */
+/** 启动时加载设置并应用语言/字体/主题 */
 export async function loadSettings(): Promise<AppSettings> {
   const s = await window.api.getSettings();
   settings.value = s;
   applyLocale(s.nativeLang);
   applyFontSize(s.fontSize);
+  applyTheme(s.theme);
+  // 翻译开启则提前预热模型（首次会下载），让"未就绪"进度条尽早出现
+  if (s.translation.enabled) {
+    window.api.setTranslateEnabled(true);
+  }
   return s;
 }
 
-/** 持久化整份设置，并重新应用语言/字体 */
+/** 持久化整份设置，并重新应用语言/字体/主题 */
 export async function saveSettings(next: AppSettings): Promise<AppSettings> {
-  const saved = await window.api.saveSettings(next);
+  // 去掉 Vue 响应式 Proxy，否则 Electron IPC 结构化克隆会抛 "could not be cloned"
+  const plain: AppSettings = JSON.parse(JSON.stringify(next));
+  const saved = await window.api.saveSettings(plain);
   settings.value = saved;
   applyLocale(saved.nativeLang);
   applyFontSize(saved.fontSize);
+  applyTheme(saved.theme);
   return saved;
+}
+
+/** 直接设置主题偏好（持久化） */
+export function setTheme(pref: ThemePref): void {
+  if (!settings.value || settings.value.theme === pref) return;
+  void saveSettings({ ...settings.value, theme: pref });
+}
+
+/** 顶栏单按钮轮替：浅 → 深 → 跟随系统 */
+export function cycleTheme(): void {
+  if (!settings.value) return;
+  const order: ThemePref[] = ['light', 'dark', 'system'];
+  setTheme(order[(order.indexOf(settings.value.theme) + 1) % order.length]);
+}
+
+/** 仅预览主题（设置页未保存前的实时预览） */
+export function previewTheme(pref: ThemePref): void {
+  applyTheme(pref);
 }
 
 /** 仅预览界面语言/字体（设置页未保存前的实时预览） */

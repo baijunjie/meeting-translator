@@ -1,5 +1,6 @@
 import { defineConfig } from 'electron-vite';
 import vue from '@vitejs/plugin-vue';
+import tailwindcss from '@tailwindcss/vite';
 import { resolve } from 'node:path';
 
 const root = process.cwd();
@@ -17,6 +18,6 @@ export default defineConfig({
         '@shared': resolve(root, 'src/shared'),
       },
     },
-    plugins: [vue()],
+    plugins: [vue(), tailwindcss()],
   },
 });

@@ -1,9 +1,11 @@
-:root {
-  --transcript-size: 15px;
-}
+@import "tailwindcss";
 
-* {
-  box-sizing: border-box;
+/* class 控制的暗色模式：祖先有 .dark 时启用 dark: 变体 */
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root {
+  /* 主页转写字体档位（small/medium/large 由 JS 设置） */
+  --transcript-size: 15px;
 }
 
 html,
@@ -15,7 +17,14 @@ body,
 
 body {
   font-family: -apple-system, "PingFang SC", "Hiragino Sans", "Apple SD Gothic Neo", sans-serif;
+}
+
+/* 整窗背景兜底（.dark 在 <html> 上），避免高度链问题露出白底 */
+html {
+  background: #ffffff;
+  color: #171717;
+}
+html.dark {
   background: #1e1f24;
-  color: #e8e8ea;
-  overflow: hidden;
+  color: #f5f5f5;
 }

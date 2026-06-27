@@ -22,118 +22,63 @@ watch(
     if (el) el.scrollTop = 0;
   }
 );
+
+const CUR_TEXT = 'text-[length:calc(var(--transcript-size)+14px)]';
+const CUR_TR = 'text-[length:calc(var(--transcript-size)+7px)]';
 </script>
 
 <template>
-  <div ref="scroller" class="transcript">
-    <p v-if="lines.length === 0 && !partial" class="empty">{{ emptyHint }}</p>
-
-    <!-- 正在识别：最大，置顶 -->
-    <div v-if="partial" class="row current partial">
-      <div class="time" />
-      <div class="body"><div class="text">{{ partial }}</div></div>
-    </div>
-
-    <!-- 历史：最新在上；没有 partial 时，最新一条作为当前项放大 -->
-    <div
-      v-for="(line, idx) in reversed"
-      :key="line.id"
-      class="row"
-      :class="{ current: !partial && idx === 0 }"
+  <div ref="scroller" class="relative flex-1 overflow-y-auto p-5">
+    <p
+      v-if="lines.length === 0 && !partial"
+      class="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-[13px] text-neutral-400 dark:text-neutral-500"
     >
-      <div class="time">{{ line.time }}</div>
-      <div class="body">
-        <div class="text">{{ line.text }}</div>
-        <div v-if="line.translation" class="translation">{{ line.translation }}</div>
+      {{ emptyHint }}
+    </p>
+
+    <!-- 正在识别：居中沉浸卡片，置顶 -->
+    <div
+      v-if="partial"
+      class="mx-auto mb-7 max-w-[88%] rounded-2xl border border-blue-500/30 bg-blue-500/10 px-6 py-8 text-center"
+    >
+      <div :class="[CUR_TEXT, 'font-semibold leading-snug text-blue-700 dark:text-[#c2ccff]']">
+        {{ partial }}
       </div>
     </div>
+
+    <!-- 历史：最新在上；没有 partial 时最新一条作为当前项居中放大 -->
+    <template v-for="(line, idx) in reversed" :key="line.id">
+      <div
+        v-if="!partial && idx === 0"
+        class="mx-auto mb-7 max-w-[88%] rounded-2xl border border-blue-500/30 bg-blue-500/10 px-6 py-8 text-center"
+      >
+        <div :class="[CUR_TEXT, 'font-semibold leading-snug text-neutral-900 dark:text-white']">
+          {{ line.text }}
+        </div>
+        <div
+          v-if="line.translation"
+          :class="[CUR_TR, 'mt-3.5 leading-snug text-blue-600 dark:text-[#9db0ff]']"
+        >
+          {{ line.translation }}
+        </div>
+      </div>
+
+      <div v-else class="mb-3.5 flex gap-3">
+        <div class="w-12 shrink-0 pt-[3px] text-[11px] text-neutral-400 dark:text-neutral-500">
+          {{ line.time }}
+        </div>
+        <div class="flex-1">
+          <div class="text-[length:var(--transcript-size)] leading-relaxed text-neutral-600 dark:text-neutral-300">
+            {{ line.text }}
+          </div>
+          <div
+            v-if="line.translation"
+            class="mt-1 border-l-2 border-blue-500 pl-2.5 text-[length:calc(var(--transcript-size)-1px)] leading-relaxed text-neutral-500 dark:text-neutral-400"
+          >
+            {{ line.translation }}
+          </div>
+        </div>
+      </div>
+    </template>
   </div>
 </template>
-
-<style scoped>
-.transcript {
-  flex: 1;
-  overflow-y: auto;
-  padding: 20px;
-  position: relative;
-}
-.empty {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  color: #8b8d98;
-  font-size: 13px;
-}
-.row {
-  display: flex;
-  gap: 12px;
-  margin-bottom: 14px;
-}
-.time {
-  flex-shrink: 0;
-  width: 48px;
-  font-size: 11px;
-  color: #8b8d98;
-  padding-top: 3px;
-}
-.body {
-  flex: 1;
-}
-.text {
-  font-size: var(--transcript-size);
-  line-height: 1.6;
-}
-.translation {
-  margin-top: 4px;
-  padding-left: 10px;
-  border-left: 2px solid #4f7cff;
-  font-size: calc(var(--transcript-size) - 1px);
-  line-height: 1.5;
-  color: #8b8d98;
-}
-
-/* 当前正在识别 / 最新一条：居中沉浸式卡片，与历史明显区分 */
-.row.current {
-  flex-direction: column;
-  align-items: center;
-  text-align: center;
-  gap: 10px;
-  margin: 6px 0 28px;
-  padding: 32px 24px;
-  border-radius: 16px;
-  background: rgba(79, 124, 255, 0.1);
-  border: 1px solid rgba(79, 124, 255, 0.28);
-}
-.current .time {
-  display: none;
-}
-.current .body {
-  width: 100%;
-  max-width: 88%;
-}
-.current .text {
-  font-size: calc(var(--transcript-size) + 14px);
-  font-weight: 600;
-  line-height: 1.5;
-  color: #ffffff;
-}
-.current .translation {
-  margin-top: 14px;
-  padding-left: 0;
-  border-left: none;
-  font-size: calc(var(--transcript-size) + 7px);
-  line-height: 1.5;
-  color: #9db0ff;
-}
-
-/* partial（未定稿）：当前卡片内文字稍偏蓝灰 */
-.current.partial .text {
-  color: #c2ccff;
-}
-
-/* 历史：略微压暗，进一步衬托当前项 */
-.row:not(.current) .text {
-  color: #c9ccd6;
-}
-</style>

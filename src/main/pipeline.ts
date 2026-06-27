@@ -41,7 +41,7 @@ function assertModelsExist(modelsDir: string): void {
   const missing = required.filter((f) => !fs.existsSync(path.join(modelsDir, f)));
   if (missing.length > 0) {
     throw new Error(
-      `模型文件缺失: ${missing.join(', ')}。请先运行 npm run download-models`
+      `模型文件缺失: ${missing.join(', ')}。请重启应用以重新下载模型`
     );
   }
 }

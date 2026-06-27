@@ -42,6 +42,20 @@ export interface TranslationStatusPayload {
   error?: string;
 }
 
+/** 首次启动下载 ASR 模型的状态 */
+export interface SetupStatus {
+  asrReady: boolean;
+}
+
+/** ASR 模型下载进度 */
+export interface SetupProgress {
+  phase: 'downloading' | 'extracting';
+  /** 已下载字节（downloading 阶段） */
+  loaded?: number;
+  /** 总字节（downloading 阶段） */
+  total?: number;
+}
+
 /** OpenAI 兼容云端翻译配置 */
 export interface CloudTranslationConfig {
   /** 形如 https://api.openai.com/v1 */
@@ -65,6 +79,9 @@ export type FontSize = 'small' | 'medium' | 'large';
 /** 界面/母语语言码（界面文案 + 翻译目标） */
 export type UiLang = 'zh' | 'ja' | 'en' | 'ko';
 
+/** 主题偏好：浅色 / 深色 / 跟随系统 */
+export type ThemePref = 'light' | 'dark' | 'system';
+
 /** 持久化到本地（electron userData）的应用设置 */
 export interface AppSettings {
   /** 是否已完成首次语言引导 */
@@ -72,6 +89,8 @@ export interface AppSettings {
   /** 母语：界面语言 + 翻译目标 */
   nativeLang: UiLang;
   fontSize: FontSize;
+  /** 主题偏好 */
+  theme: ThemePref;
   translation: TranslationSettings;
 }
 
@@ -84,6 +103,11 @@ export interface MeetingApi {
   setTranslateEnabled(enabled: boolean): void;
   getSettings(): Promise<AppSettings>;
   saveSettings(settings: AppSettings): Promise<AppSettings>;
+  /** 首次启动：查询 ASR 模型是否已就绪 */
+  getSetupStatus(): Promise<SetupStatus>;
+  /** 下载 ASR 模型，返回结果（失败带 error，供重试） */
+  downloadAsrModels(): Promise<{ ok: boolean; error?: string }>;
+  onSetupProgress(cb: (progress: SetupProgress) => void): void;
   onSegment(cb: (segment: SegmentPayload) => void): void;
   onPartial(cb: (partial: PartialPayload) => void): void;
   onTranslation(cb: (translation: TranslationPayload) => void): void;

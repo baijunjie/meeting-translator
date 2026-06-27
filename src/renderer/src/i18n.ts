@@ -2,13 +2,25 @@ import { createI18n } from 'vue-i18n';
 
 const messages = {
   zh: {
-    onboarding: { title: '欢迎使用 Meeting Translator', subtitle: '请选择你的语言' },
+    onboarding: { title: '欢迎使用 Meeting Translator', subtitle: '请选择你的语言', configure: '简单配置后即可开始', start: '开始使用' },
+    setup: {
+      title: '首次使用，需要准备语音模型',
+      desc: '将联网下载语音识别模型（约 230MB），完成后即可离线使用。',
+      downloading: '下载中',
+      extracting: '正在安装…',
+      failed: '下载失败，请检查网络后重试。',
+      retry: '重试',
+    },
     main: {
       start: '开始录音',
       stop: '停止录音',
       translate: '翻译',
       settings: '设置',
       clear: '清屏',
+      theme: '主题',
+      themeLight: '浅色',
+      themeDark: '深色',
+      themeSystem: '跟随系统',
       emptyHint: '点击「开始录音」，识别结果会显示在这里',
     },
     status: {
@@ -40,13 +52,25 @@ const messages = {
     },
   },
   ja: {
-    onboarding: { title: 'Meeting Translator へようこそ', subtitle: '言語を選択してください' },
+    onboarding: { title: 'Meeting Translator へようこそ', subtitle: '言語を選択してください', configure: '簡単な設定を行って始めましょう', start: '使ってみる' },
+    setup: {
+      title: '初回起動：音声モデルの準備が必要です',
+      desc: '音声認識モデル（約 230MB）をダウンロードします。完了後はオフラインで利用できます。',
+      downloading: 'ダウンロード中',
+      extracting: 'インストール中…',
+      failed: 'ダウンロードに失敗しました。ネットワークを確認して再試行してください。',
+      retry: '再試行',
+    },
     main: {
       start: '録音開始',
       stop: '録音停止',
       translate: '翻訳',
       settings: '設定',
       clear: 'クリア',
+      theme: 'テーマ',
+      themeLight: 'ライト',
+      themeDark: 'ダーク',
+      themeSystem: 'システムに合わせる',
       emptyHint: '「録音開始」をクリックすると、認識結果がここに表示されます',
     },
     status: {
@@ -78,13 +102,25 @@ const messages = {
     },
   },
   en: {
-    onboarding: { title: 'Welcome to Meeting Translator', subtitle: 'Choose your language' },
+    onboarding: { title: 'Welcome to Meeting Translator', subtitle: 'Choose your language', configure: 'Set up your preferences to get started', start: 'Get Started' },
+    setup: {
+      title: 'First-time setup: speech models needed',
+      desc: 'The speech recognition model (~230MB) will be downloaded. Works offline afterward.',
+      downloading: 'Downloading',
+      extracting: 'Installing…',
+      failed: 'Download failed. Check your network and retry.',
+      retry: 'Retry',
+    },
     main: {
       start: 'Start Recording',
       stop: 'Stop Recording',
       translate: 'Translate',
       settings: 'Settings',
       clear: 'Clear',
+      theme: 'Theme',
+      themeLight: 'Light',
+      themeDark: 'Dark',
+      themeSystem: 'System',
       emptyHint: 'Click “Start Recording” and results will appear here',
     },
     status: {
@@ -116,13 +152,25 @@ const messages = {
     },
   },
   ko: {
-    onboarding: { title: 'Meeting Translator에 오신 것을 환영합니다', subtitle: '언어를 선택하세요' },
+    onboarding: { title: 'Meeting Translator에 오신 것을 환영합니다', subtitle: '언어를 선택하세요', configure: '간단한 설정 후 시작하세요', start: '시작하기' },
+    setup: {
+      title: '첫 실행: 음성 모델 준비가 필요합니다',
+      desc: '음성 인식 모델(약 230MB)을 다운로드합니다. 완료 후에는 오프라인으로 사용할 수 있습니다.',
+      downloading: '다운로드 중',
+      extracting: '설치 중…',
+      failed: '다운로드 실패. 네트워크를 확인하고 다시 시도하세요.',
+      retry: '다시 시도',
+    },
     main: {
       start: '녹음 시작',
       stop: '녹음 중지',
       translate: '번역',
       settings: '설정',
       clear: '지우기',
+      theme: '테마',
+      themeLight: '라이트',
+      themeDark: '다크',
+      themeSystem: '시스템 설정',
       emptyHint: '「녹음 시작」을 누르면 인식 결과가 여기에 표시됩니다',
     },
     status: {

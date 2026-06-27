@@ -3,7 +3,8 @@ import { app, BrowserWindow, ipcMain, systemPreferences } from 'electron';
 import { TranscriptionPipeline } from './pipeline';
 import { createTranslator, type Translator } from './translation/translator';
 import { loadSettings, saveSettings } from './settings';
-import type { StartResult, AppSettings, SegmentPayload } from '../shared/types';
+import { asrModelsReady, downloadAsrModels } from './model-downloader';
+import type { StartResult, AppSettings, SegmentPayload, SetupStatus } from '../shared/types';
 
 // 模型在仓库/应用根目录的 models/ 下（electron-vite 下 __dirname 指向 out/main）
 const MODELS_DIR = path.join(app.getAppPath(), 'models');
@@ -62,10 +63,19 @@ function ensureTranslator(): Promise<Translator> {
   const instance = translator; // 固定本次实例，期间即便 resetTranslator 也不受影响
   if (!translatorReady) {
     sendToRenderer('translation:status', { state: 'loading' });
+    // 模型由多个文件组成，按总字节聚合进度，避免逐文件来回跳
+    const fileBytes = new Map<string, { loaded: number; total: number }>();
     translatorReady = instance
       .init((p) => {
-        if (typeof p.progress === 'number') {
-          sendToRenderer('translation:status', { state: 'loading', progress: p.progress / 100 });
+        if (p.file && typeof p.loaded === 'number' && typeof p.total === 'number' && p.total > 0) {
+          fileBytes.set(p.file, { loaded: p.loaded, total: p.total });
+          let loaded = 0;
+          let total = 0;
+          for (const f of fileBytes.values()) {
+            loaded += f.loaded;
+            total += f.total;
+          }
+          sendToRenderer('translation:status', { state: 'loading', progress: loaded / total });
         }
       })
       .then(() => sendToRenderer('translation:status', { state: 'ready' }))
@@ -121,6 +131,17 @@ ipcMain.handle('pipeline:start', async (): Promise<StartResult> => {
   return { ok: true };
 });
 
+ipcMain.handle('setup:get-status', (): SetupStatus => ({ asrReady: asrModelsReady(MODELS_DIR) }));
+
+ipcMain.handle('setup:download-asr', async (): Promise<{ ok: boolean; error?: string }> => {
+  try {
+    await downloadAsrModels(MODELS_DIR, (p) => sendToRenderer('setup:progress', p));
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: (err as Error).message };
+  }
+});
+
 ipcMain.on('pipeline:audio', (_event, samples: Float32Array) => {
   if (!pipeline) {
     return;
@@ -154,10 +175,22 @@ ipcMain.on('translation:set-enabled', (_event, enabled: boolean) => {
 ipcMain.handle('settings:get', (): AppSettings => loadSettings());
 
 ipcMain.handle('settings:save', (_event, next: AppSettings): AppSettings => {
+  const prev = loadSettings().translation;
+  const cur = next.translation;
+  // 只有翻译引擎/云端配置变了才需要重建翻译器；
+  // 改主题/字体/母语不应触动翻译器（否则会误触发模型重新加载）
+  const engineChanged =
+    prev.engine !== cur.engine ||
+    prev.cloud.baseURL !== cur.cloud.baseURL ||
+    prev.cloud.apiKey !== cur.cloud.apiKey ||
+    prev.cloud.model !== cur.cloud.model;
+
   const saved = saveSettings(next);
-  resetTranslator(); // 引擎/密钥可能变了，重建
-  if (saved.translation.enabled) {
-    ensureTranslator().catch(() => {});
+  if (engineChanged) {
+    resetTranslator();
+    if (saved.translation.enabled) {
+      ensureTranslator().catch(() => {});
+    }
   }
   return saved;
 });

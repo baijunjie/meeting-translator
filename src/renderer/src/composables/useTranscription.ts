@@ -1,7 +1,4 @@
 import { reactive, ref } from 'vue';
-import { i18n } from '../i18n';
-
-const t = i18n.global.t;
 
 export interface TranscriptLine {
   id: number;
@@ -14,17 +11,15 @@ export const lines = reactive<TranscriptLine[]>([]);
 export const partial = ref('');
 export const recording = ref(false);
 
-// 状态栏：keyed 状态随界面语言切换，dynamic 文本（进度/错误）直接显示
-export const statusKey = ref('status.ready');
-export const statusText = ref('');
+// 软件未就绪：加载 ASR 模型中（录音管线就绪前）
+export const modelLoading = ref(false);
+// 录音/管线错误（原始文案）
+export const errorText = ref('');
 
-function setStatusKey(key: string): void {
-  statusKey.value = key;
-  statusText.value = '';
-}
-function setStatusText(text: string): void {
-  statusText.value = text;
-}
+// 翻译模型状态（独立，顶部进度条 / 开关旁错误提示）
+export const translationLoading = ref(false);
+export const translationProgress = ref(0); // 0~100
+export const translationError = ref(false);
 
 function fmtTime(seconds: number): string {
   const m = Math.floor(seconds / 60);
@@ -54,30 +49,41 @@ function register(): void {
   });
   window.api.onStatus((s) => {
     if (s.state === 'loading') {
-      setStatusKey('status.loadingModel');
+      modelLoading.value = true;
+    } else if (s.state === 'running') {
+      modelLoading.value = false;
+      errorText.value = '';
     } else if (s.state === 'error') {
-      setStatusText(t('status.errorPrefix') + s.error);
+      modelLoading.value = false;
+      errorText.value = s.error ?? 'Error';
       if (recording.value) void stopRecording();
+    } else if (s.state === 'stopped') {
+      modelLoading.value = false;
     }
   });
   window.api.onTranslationStatus((s) => {
     if (s.state === 'loading') {
-      const pct = typeof s.progress === 'number' ? ` ${Math.round(s.progress * 100)}%` : '';
-      setStatusText(t('status.transLoading') + pct);
+      translationLoading.value = true;
+      translationError.value = false;
+      if (typeof s.progress === 'number') {
+        translationProgress.value = Math.round(s.progress * 100);
+      }
     } else if (s.state === 'error') {
-      setStatusText(t('status.transFailed'));
-    } else if (s.state === 'ready' && recording.value) {
-      setStatusKey('status.recording');
+      translationLoading.value = false;
+      translationError.value = true;
+    } else if (s.state === 'ready') {
+      translationLoading.value = false;
+      translationError.value = false;
     }
   });
 }
 register();
 
 export async function startRecording(): Promise<void> {
-  setStatusKey('status.loadingModel');
+  errorText.value = '';
   const result = await window.api.startPipeline();
   if (!result.ok) {
-    setStatusText(result.error ?? t('status.errorPrefix'));
+    errorText.value = result.error ?? 'Error';
     return;
   }
 
@@ -90,7 +96,6 @@ export async function startRecording(): Promise<void> {
   source.connect(capture);
 
   recording.value = true;
-  setStatusKey('status.recording');
 }
 
 export async function stopRecording(): Promise<void> {
@@ -105,7 +110,6 @@ export async function stopRecording(): Promise<void> {
   }
   await window.api.stopPipeline();
   partial.value = '';
-  setStatusKey('status.stopped');
 }
 
 export function toggleRecording(): void {

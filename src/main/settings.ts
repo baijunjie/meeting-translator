@@ -8,10 +8,18 @@ import type { AppSettings, UiLang } from '../shared/types';
 const UI_LANGS: UiLang[] = ['zh', 'ja', 'en', 'ko'];
 
 function defaultNativeLang(): UiLang {
-  // 按系统语言猜母语，落到我们支持的 4 种之一，否则英语
-  const locale = (app.getLocale() || '').toLowerCase();
-  const hit = UI_LANGS.find((l) => locale.startsWith(l));
-  return hit ?? 'en';
+  // 按系统语言猜母语，落到我们支持的 4 种之一，否则英语。
+  // 优先用系统偏好语言（getLocale 返回的是 Chromium/应用语言，开发环境常为 en-US）。
+  const candidates = [
+    ...(app.getPreferredSystemLanguages?.() ?? []),
+    app.getSystemLocale?.() ?? '',
+    app.getLocale(),
+  ].map((l) => (l || '').toLowerCase());
+  for (const c of candidates) {
+    const hit = UI_LANGS.find((l) => c.startsWith(l));
+    if (hit) return hit;
+  }
+  return 'en';
 }
 
 function makeDefaults(): AppSettings {
@@ -19,6 +27,7 @@ function makeDefaults(): AppSettings {
     onboarded: false,
     nativeLang: defaultNativeLang(),
     fontSize: 'medium',
+    theme: 'system',
     translation: {
       enabled: false,
       engine: 'local',
@@ -62,6 +71,8 @@ function withDefaults(raw: unknown): AppSettings {
     nativeLang: asUiLang(s.nativeLang) ?? legacyTarget ?? d.nativeLang,
     fontSize:
       s.fontSize === 'small' || s.fontSize === 'large' ? s.fontSize : d.fontSize,
+    theme:
+      s.theme === 'light' || s.theme === 'dark' ? s.theme : d.theme,
     translation: {
       enabled,
       engine: t.engine === 'cloud' ? 'cloud' : 'local',
