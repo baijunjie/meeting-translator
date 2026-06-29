@@ -24,7 +24,7 @@ export interface LocalModelSpec {
   /** HuggingFace 仓库标识（首次联网下载后离线复用） */
   modelId: string;
   /** 量化档位 */
-  dtype: 'q8' | 'q4';
+  dtype: 'q8';
   /** app 语言（含 ASR 源码 yue）→ 处理方式；未列出的语言回退到 fallbackLang */
   langs: Record<string, LangEntry>;
   /** 未知语言的回退（通常英语） */
@@ -47,27 +47,9 @@ export const M2M100_SPEC: LocalModelSpec = {
   },
 };
 
-// NLLB-200-distilled-600M（CC-BY-NC，较大）。原生区分简/繁，且支持粤语，无需脚本转换。
-// 用 q4(4-bit MatMulNBits) 而非 q8：q8 会把 25.6 万词表权重反量化成 ~1GB 的 fp32 单块，
-// 在 Electron 进程里会被分配器直接 abort；q4 在 kernel 内分块解量化，不产生巨块分配。
-export const NLLB_SPEC: LocalModelSpec = {
-  id: 'nllb',
-  modelId: 'Xenova/nllb-200-distilled-600M',
-  dtype: 'q4',
-  fallbackLang: 'en',
-  langs: {
-    zh: { code: 'zho_Hans' },
-    'zh-Hant': { code: 'zho_Hant' },
-    en: { code: 'eng_Latn' },
-    ja: { code: 'jpn_Jpan' },
-    ko: { code: 'kor_Hang' },
-    yue: { code: 'yue_Hant' },
-  },
-};
-
+// 新增本地模型只需在此加一份 spec（许可需为可自由分发，如 MIT/Apache）。
 const SPECS: Record<LocalEngine, LocalModelSpec> = {
   m2m100: M2M100_SPEC,
-  nllb: NLLB_SPEC,
 };
 
 // pipeline() 返回的可调用对象：输入文本 + 源/目标语言码，输出 [{ translation_text }]

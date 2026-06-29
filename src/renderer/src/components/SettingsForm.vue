@@ -47,7 +47,6 @@ const themeOptions = computed(() => [
 ]);
 const engineOptions = computed(() => [
   { label: t('settings.engineM2m100'), value: 'm2m100' },
-  { label: t('settings.engineNllb'), value: 'nllb' },
   { label: t('settings.engineCloud'), value: 'cloud' },
 ]);
 

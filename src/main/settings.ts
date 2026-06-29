@@ -79,8 +79,8 @@ function withDefaults(raw: unknown): AppSettings {
       s.theme === 'light' || s.theme === 'dark' ? s.theme : d.theme,
     translation: {
       enabled,
-      // 旧值 'local' 迁移到 'm2m100'
-      engine: t.engine === 'cloud' ? 'cloud' : t.engine === 'nllb' ? 'nllb' : 'm2m100',
+      // 旧值 'local' / 已移除的 'nllb' 一律迁移到 'm2m100'
+      engine: t.engine === 'cloud' ? 'cloud' : 'm2m100',
       cloud: {
         baseURL: (cloud.baseURL as string) || d.translation.cloud.baseURL,
         apiKey: (cloud.apiKey as string) ?? '',
