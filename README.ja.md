@@ -69,15 +69,25 @@ npm run test-translate              # 多方向翻訳（初回はモデルをダ
 
 ## アーキテクチャ
 
-```
-レンダラ                     メインプロセス        utilityProcess × 2（隔離）
-マイク (getUserMedia)
-  └ AudioWorklet で 16kHz PCM を取得
-       └ IPC ───────▶ 音声を転送 ───▶ ASR：Silero VAD → SenseVoice (zh/en/ja/ko/yue)
-                                        ├ 発話中    → 途中認識（ライブ）
-                                        └ 区切りで  → 確定結果
-                       translate(text) ▶ 翻訳：M2M100  ·  またはクラウド（OpenAI 互換）
-       文字起こし + 訳文 ◀─ IPC ◀── 結果
+```mermaid
+flowchart LR
+  subgraph RENDER["レンダラ"]
+    MIC["マイク (getUserMedia)<br/>AudioWorklet で 16kHz PCM を取得"]
+    UI["文字起こし + 訳文"]
+  end
+  subgraph MAIN["メインプロセス"]
+    HUB["転送 / 調停"]
+  end
+  subgraph UTIL["utilityProcess × 2（隔離）"]
+    ASR["ASR：Silero VAD → SenseVoice<br/>(zh / en / ja / ko / yue)<br/>発話中→途中認識 · 区切り→確定結果"]
+    TRANS["翻訳：M2M100<br/>· またはクラウド（OpenAI 互換）"]
+  end
+  MIC -- "IPC：音声" --> HUB
+  HUB -- 音声 --> ASR
+  ASR -- "途中 / 確定" --> HUB
+  HUB -- "translate(text)" --> TRANS
+  TRANS -- 訳文 --> HUB
+  HUB -- "IPC：結果" --> UI
 ```
 
 ASR と翻訳はそれぞれ独立した Electron `utilityProcess` で動作します。重いネイティブ推論が UI をブロックせず、ネイティブクラッシュや巨大なメモリ確保もそのプロセス内に隔離され、アプリ全体を巻き込みません。

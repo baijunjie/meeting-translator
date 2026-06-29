@@ -69,15 +69,25 @@ Traditional Chinese output is produced by converting M2M100's result with OpenCC
 
 ## Architecture
 
-```
-Renderer                     Main process          utilityProcess × 2 (isolated)
-Microphone (getUserMedia)
-  └ AudioWorklet → 16kHz PCM
-       └ IPC ───────▶ forward audio ──▶ ASR:  Silero VAD → SenseVoice (zh/en/ja/ko/yue)
-                                          ├ speaking    → partial decode (live)
-                                          └ segment end → final result
-                       translate(text) ─▶ Translation:  M2M100  ·  or Cloud (OpenAI-compatible)
-       transcript + translation ◀─ IPC ◀── results
+```mermaid
+flowchart LR
+  subgraph RENDER["Renderer"]
+    MIC["Microphone (getUserMedia)<br/>AudioWorklet → 16kHz PCM"]
+    UI["transcript + translation"]
+  end
+  subgraph MAIN["Main process"]
+    HUB["forward / orchestrate"]
+  end
+  subgraph UTIL["utilityProcess × 2 (isolated)"]
+    ASR["ASR: Silero VAD → SenseVoice<br/>(zh / en / ja / ko / yue)<br/>partial while speaking · final on segment end"]
+    TRANS["Translation: M2M100<br/>· or Cloud (OpenAI-compatible)"]
+  end
+  MIC -- "IPC: audio" --> HUB
+  HUB -- audio --> ASR
+  ASR -- "partial / final" --> HUB
+  HUB -- "translate(text)" --> TRANS
+  TRANS -- text --> HUB
+  HUB -- "IPC: results" --> UI
 ```
 
 ASR and translation each run in their own Electron `utilityProcess`, so heavy native inference never blocks the UI — and a native crash (or oversized allocation) is isolated to that process instead of taking down the app.

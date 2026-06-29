@@ -69,15 +69,25 @@ npm run test-translate              # 다방향 번역(최초 실행 시 모델 
 
 ## 아키텍처
 
-```
-렌더러                       메인 프로세스         utilityProcess × 2(격리)
-마이크 (getUserMedia)
-  └ AudioWorklet로 16kHz PCM 캡처
-       └ IPC ───────▶ 오디오 전달 ───▶ ASR: Silero VAD → SenseVoice (zh/en/ja/ko/yue)
-                                        ├ 말하는 중  → 부분 인식(실시간)
-                                        └ 구간 종료  → 최종 결과
-                       translate(text) ▶ 번역: M2M100  ·  또는 클라우드(OpenAI 호환)
-       전사 + 번역 ◀─ IPC ◀── 결과
+```mermaid
+flowchart LR
+  subgraph RENDER["렌더러"]
+    MIC["마이크 (getUserMedia)<br/>AudioWorklet로 16kHz PCM 캡처"]
+    UI["전사 + 번역"]
+  end
+  subgraph MAIN["메인 프로세스"]
+    HUB["전달 / 조정"]
+  end
+  subgraph UTIL["utilityProcess × 2(격리)"]
+    ASR["ASR: Silero VAD → SenseVoice<br/>(zh / en / ja / ko / yue)<br/>말하는 중→부분 인식 · 구간 종료→최종 결과"]
+    TRANS["번역: M2M100<br/>· 또는 클라우드(OpenAI 호환)"]
+  end
+  MIC -- "IPC: 오디오" --> HUB
+  HUB -- 오디오 --> ASR
+  ASR -- "부분 / 최종" --> HUB
+  HUB -- "translate(text)" --> TRANS
+  TRANS -- 번역 --> HUB
+  HUB -- "IPC: 결과" --> UI
 ```
 
 ASR과 번역은 각각 독립된 Electron `utilityProcess`에서 실행됩니다. 무거운 네이티브 추론이 UI를 막지 않고, 네이티브 크래시나 과도한 메모리 할당도 해당 프로세스에만 격리되어 앱 전체를 끌어내리지 않습니다.

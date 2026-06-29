@@ -69,15 +69,25 @@ npm run test-translate              # 多向翻译（首次会下载模型）
 
 ## 技术架构
 
-```
-渲染进程                     主进程               utilityProcess × 2（隔离）
-麦克风 (getUserMedia)
-  └ AudioWorklet 采集 16kHz PCM
-       └ IPC ───────▶ 转发音频 ─────▶ ASR：Silero VAD → SenseVoice (zh/en/ja/ko/yue)
-                                        ├ 说话中    → 部分识别（实时上屏）
-                                        └ 段结束    → 最终结果
-                       translate(text) ▶ 翻译：M2M100  ·  或云端（OpenAI 兼容）
-       转写 + 译文 ◀─ IPC ◀── 结果
+```mermaid
+flowchart LR
+  subgraph RENDER["渲染进程"]
+    MIC["麦克风 (getUserMedia)<br/>AudioWorklet 采集 16kHz PCM"]
+    UI["转写 + 译文"]
+  end
+  subgraph MAIN["主进程"]
+    HUB["转发 / 调度"]
+  end
+  subgraph UTIL["utilityProcess × 2（隔离）"]
+    ASR["ASR：Silero VAD → SenseVoice<br/>(zh / en / ja / ko / yue)<br/>说话中→部分识别 · 段结束→最终结果"]
+    TRANS["翻译：M2M100<br/>· 或云端（OpenAI 兼容）"]
+  end
+  MIC -- "IPC：音频" --> HUB
+  HUB -- 音频 --> ASR
+  ASR -- "部分 / 最终" --> HUB
+  HUB -- "translate(text)" --> TRANS
+  TRANS -- 译文 --> HUB
+  HUB -- "IPC：结果" --> UI
 ```
 
 ASR 与翻译各自跑在独立的 Electron `utilityProcess`：重推理不阻塞 UI，原生崩溃或超大内存分配也只影响该子进程，不会拖垮整个应用。
