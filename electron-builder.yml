@@ -1,0 +1,35 @@
+appId: jp.elestyle.meeting-translator
+productName: Meeting Translator
+directories:
+  output: release
+  buildResources: build
+# electron-vite 产物在 out/；node_modules 由 electron-builder 按生产依赖自动包含
+files:
+  - out/**
+  - package.json
+  # onnxruntime-node 自带全平台二进制，仅保留 macOS arm64，去掉 linux/win/x64 以瘦身
+  - "!**/node_modules/onnxruntime-node/bin/napi-v6/linux/**"
+  - "!**/node_modules/onnxruntime-node/bin/napi-v6/win32/**"
+  - "!**/node_modules/onnxruntime-node/bin/napi-v6/darwin/x64/**"
+# 原生模块带 .node/.dylib，不能从 asar 内加载，必须解包到 app.asar.unpacked
+asarUnpack:
+  - "**/node_modules/sherpa-onnx-node/**"
+  - "**/node_modules/onnxruntime-node/**"
+  - "**/node_modules/sharp/**"
+  - "**/node_modules/@img/**"
+# 原生模块是 N-API 预编译产物（ABI 稳定），无需也不应重新编译
+npmRebuild: false
+mac:
+  category: public.app-category.productivity
+  icon: build/icon.icns
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+  extendInfo:
+    NSMicrophoneUsageDescription: 用于实时识别与翻译会议语音（音频仅在本机处理，不上传）
+  target:
+    - target: dmg
+      arch: [arm64]
+dmg:
+  title: ${productName}

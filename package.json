@@ -14,7 +14,9 @@
     "clean:settings": "bash scripts/clean.sh --settings",
     "clean:all": "bash scripts/clean.sh --all",
     "test-pipeline": "tsc -p tsconfig.test.json && node dist-test/test/pipeline.js",
-    "test-translate": "tsc -p tsconfig.test.json && node dist-test/test/translate.js"
+    "test-translate": "tsc -p tsconfig.test.json && node dist-test/test/translate.js",
+    "dist": "npm run build && electron-builder --mac",
+    "dist:dir": "npm run build && electron-builder --mac --dir"
   },
   "keywords": [],
   "author": "",
@@ -23,7 +25,6 @@
     "@huggingface/transformers": "^4.2.0",
     "@lucide/vue": "^1.21.0",
     "chinese-conv": "^4.0.0",
-    "electron": "^42.4.0",
     "naive-ui": "^2.44.1",
     "sherpa-onnx-node": "^1.13.2",
     "vue": "^3.5.39",
@@ -33,6 +34,8 @@
     "@tailwindcss/vite": "^4.3.1",
     "@types/node": "^22.10.0",
     "@vitejs/plugin-vue": "^6.0.7",
+    "electron": "^42.4.0",
+    "electron-builder": "^25.1.8",
     "electron-vite": "^5.0.0",
     "tailwindcss": "^4.3.1",
     "typescript": "^5.7.0",

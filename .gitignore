@@ -3,6 +3,7 @@ models/
 dist/
 dist-test/
 out/
+release/
 *.log
 .DS_Store
 .idea/

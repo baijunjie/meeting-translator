@@ -15,8 +15,12 @@ import type {
   ArchiveLine,
 } from '../shared/types';
 
-// 模型在仓库/应用根目录的 models/ 下（electron-vite 下 __dirname 指向 out/main）
-const MODELS_DIR = path.join(app.getAppPath(), 'models');
+// 模型存放目录：
+// - 打包后 app.getAppPath() 指向只读的 app.asar，必须写到可写的 userData；
+// - 开发时用仓库根目录的 models/，便于复用已下载的模型。
+const MODELS_DIR = app.isPackaged
+  ? path.join(app.getPath('userData'), 'models')
+  : path.join(app.getAppPath(), 'models');
 const TRANSLATION_CACHE_DIR = path.join(MODELS_DIR, 'transformers');
 
 let win: BrowserWindow | null = null;
@@ -28,7 +32,8 @@ let asrReady: Promise<void> | null = null;
 // 在主进程会被 Chromium 分配器 abort），翻译进程挂掉也不连累主窗口，仅丢一次翻译
 let translateChild: UtilityProcess | null = null;
 
-// 应用图标（dev 下 Dock 显示 Electron 默认图标，需手动设置）
+// 应用图标：仅开发时手动设置（dev 下 Dock 默认显示 Electron 图标）；
+// 打包后图标由 electron-builder 写入 .app，无需也无法从 asar 取此路径。
 const APP_ICON = path.join(app.getAppPath(), 'build', 'icon.png');
 
 function createWindow(): void {
@@ -36,7 +41,7 @@ function createWindow(): void {
     width: 1100,
     height: 760,
     title: 'Meeting Translator',
-    icon: APP_ICON,
+    ...(app.isPackaged ? {} : { icon: APP_ICON }),
     webPreferences: {
       preload: path.join(__dirname, '../preload/index.js'),
       contextIsolation: true,
@@ -253,8 +258,8 @@ ipcMain.handle('pipeline:stop', () => {
 });
 
 app.whenReady().then(() => {
-  // macOS：dev 下 Dock 默认显示 Electron 图标，手动替换为应用图标
-  if (process.platform === 'darwin' && app.dock) {
+  // macOS dev：Dock 默认显示 Electron 图标，手动替换；打包后用 .app 内置图标
+  if (!app.isPackaged && process.platform === 'darwin' && app.dock) {
     app.dock.setIcon(APP_ICON);
   }
   createWindow();
