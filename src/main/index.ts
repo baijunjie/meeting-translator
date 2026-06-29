@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { app, BrowserWindow, ipcMain, systemPreferences, utilityProcess, type UtilityProcess } from 'electron';
+import { app, BrowserWindow, ipcMain, shell, systemPreferences, utilityProcess, type UtilityProcess } from 'electron';
 import { loadSettings, saveSettings } from './settings';
 import { asrModelsReady, downloadAsrModels } from './model-downloader';
 import { listArchives, getArchive, saveArchive, deleteArchive } from './archives';
@@ -13,6 +13,7 @@ import type {
   AsrToMain,
   TranslateToMain,
   ArchiveLine,
+  MicPermission,
 } from '../shared/types';
 
 // 模型存放目录：
@@ -185,6 +186,19 @@ ipcMain.handle('pipeline:start', async (): Promise<StartResult> => {
   }
   sendToRenderer('pipeline:status', { state: 'running' });
   return { ok: true };
+});
+
+// 麦克风权限：渲染层在请求权限前先查状态，自行决定是否弹说明弹窗
+ipcMain.handle('mic:get-status', (): MicPermission =>
+  process.platform === 'darwin' ? systemPreferences.getMediaAccessStatus('microphone') : 'granted'
+);
+
+ipcMain.on('mic:open-settings', () => {
+  if (process.platform === 'darwin') {
+    void shell.openExternal(
+      'x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone'
+    );
+  }
 });
 
 ipcMain.handle('setup:get-status', (): SetupStatus => ({ asrReady: asrModelsReady(MODELS_DIR) }));

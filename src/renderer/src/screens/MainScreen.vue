@@ -83,6 +83,46 @@ const themeIcon = computed(() =>
 // 仅 ASR 模型加载属于"软件未就绪"：显示进度条并禁用录音。
 // 翻译模型加载/下载是可选项，只在翻译开关旁提示，不挡录音。
 const preparing = computed(() => modelLoading.value);
+
+// 麦克风权限弹窗：''=不显示；'ask'=首次说明；'denied'=已拒绝去设置
+const micModal = ref<'' | 'ask' | 'denied'>('');
+const showMicModal = computed({
+  get: () => micModal.value !== '',
+  set: (v: boolean) => {
+    if (!v) micModal.value = '';
+  },
+});
+
+// 录音按钮：停止无需权限；开始前先查权限——未决先弹说明再触发系统授权，已拒绝则引导去设置
+async function onRecordClick(): Promise<void> {
+  if (recording.value) {
+    toggleRecording();
+    return;
+  }
+  let status = 'granted';
+  try {
+    status = await window.api.getMicStatus();
+  } catch {
+    /* 查询失败按已授权处理，让系统弹窗兜底 */
+  }
+  if (status === 'granted') {
+    toggleRecording();
+  } else if (status === 'denied' || status === 'restricted') {
+    micModal.value = 'denied';
+  } else {
+    micModal.value = 'ask';
+  }
+}
+
+function confirmMic(): void {
+  micModal.value = '';
+  toggleRecording(); // 此时才触发系统权限请求
+}
+
+function openMicSettings(): void {
+  window.api.openMicSettings();
+  micModal.value = '';
+}
 </script>
 
 <template>
@@ -132,7 +172,7 @@ const preparing = computed(() => modelLoading.value);
       <n-button quaternary circle :title="t('main.settings')" @click="$emit('open-settings')">
         <template #icon><Settings :size="18" /></template>
       </n-button>
-      <n-button :type="recording ? 'error' : 'primary'" :disabled="preparing" @click="toggleRecording">
+      <n-button :type="recording ? 'error' : 'primary'" :disabled="preparing" @click="onRecordClick">
         {{ recording ? t('main.stop') : t('main.start') }}
       </n-button>
     </header>
@@ -168,6 +208,27 @@ const preparing = computed(() => modelLoading.value);
         <div class="flex justify-end gap-2">
           <n-button @click="archiveModalOpen = false">{{ t('archive.cancel') }}</n-button>
           <n-button type="primary" @click="confirmArchive">{{ t('archive.save') }}</n-button>
+        </div>
+      </template>
+    </n-modal>
+
+    <!-- 麦克风权限说明弹窗：在触发系统授权前先告知用途 -->
+    <n-modal
+      v-model:show="showMicModal"
+      preset="card"
+      :title="micModal === 'denied' ? t('mic.deniedTitle') : t('mic.title')"
+      style="width: 420px; max-width: 90vw"
+    >
+      <p class="text-sm leading-relaxed text-neutral-600 dark:text-neutral-300">
+        {{ micModal === 'denied' ? t('mic.deniedDesc') : t('mic.desc') }}
+      </p>
+      <template #footer>
+        <div class="flex justify-end gap-2">
+          <n-button @click="micModal = ''">{{ t('mic.cancel') }}</n-button>
+          <n-button v-if="micModal === 'denied'" type="primary" @click="openMicSettings">
+            {{ t('mic.openSettings') }}
+          </n-button>
+          <n-button v-else type="primary" @click="confirmMic">{{ t('mic.allow') }}</n-button>
         </div>
       </template>
     </n-modal>

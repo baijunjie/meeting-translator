@@ -27,6 +27,16 @@ const messages = {
       translate: 'Translate',
       viewArchives: 'Archives',
     },
+    mic: {
+      allow: 'Allow & Start',
+      cancel: 'Cancel',
+      deniedDesc:
+        'Microphone access was denied. Allow Meeting Translator in System Settings › Privacy & Security › Microphone, then try again.',
+      deniedTitle: 'Microphone access denied',
+      desc: 'Recording captures microphone audio in real time for on-device speech recognition and translation. Audio is processed locally and never uploaded.',
+      openSettings: 'Open System Settings',
+      title: 'Microphone permission needed',
+    },
     onboarding: {
       configure: 'Set up your preferences to get started',
       start: 'Get Started',
@@ -95,6 +105,16 @@ const messages = {
       themeSystem: 'システムに合わせる',
       translate: '翻訳',
       viewArchives: 'アーカイブ',
+    },
+    mic: {
+      allow: '許可して開始',
+      cancel: 'キャンセル',
+      deniedDesc:
+        'マイクへのアクセスが拒否されています。「システム設定 › プライバシーとセキュリティ › マイク」で Meeting Translator を許可してから再試行してください。',
+      deniedTitle: 'マイクのアクセスが拒否されました',
+      desc: '録音を開始すると、会議音声の認識と翻訳のためにマイク音声をリアルタイムで取得します。音声は端末内で処理され、アップロードされません。',
+      openSettings: 'システム設定を開く',
+      title: 'マイクの許可が必要です',
     },
     onboarding: {
       configure: '簡単な設定を行って始めましょう',
@@ -165,6 +185,16 @@ const messages = {
       translate: '번역',
       viewArchives: '보관 기록',
     },
+    mic: {
+      allow: '허용하고 시작',
+      cancel: '취소',
+      deniedDesc:
+        '마이크 접근이 거부되었습니다. 「시스템 설정 › 개인정보 보호 및 보안 › 마이크」에서 Meeting Translator를 허용한 후 다시 시도하세요.',
+      deniedTitle: '마이크 접근 거부됨',
+      desc: '녹음을 시작하면 회의 음성 인식 및 번역을 위해 마이크 오디오를 실시간으로 수집합니다. 오디오는 기기에서만 처리되며 업로드되지 않습니다.',
+      openSettings: '시스템 설정 열기',
+      title: '마이크 권한 필요',
+    },
     onboarding: {
       configure: '간단한 설정 후 시작하세요',
       start: '시작하기',
@@ -232,6 +262,16 @@ const messages = {
       translate: '翻译',
       viewArchives: '归档记录',
     },
+    mic: {
+      allow: '允许并开始',
+      cancel: '取消',
+      deniedDesc:
+        '麦克风权限已被拒绝。请在「系统设置 › 隐私与安全性 › 麦克风」中允许 Meeting Translator 后重试。',
+      deniedTitle: '麦克风权限被拒绝',
+      desc: '开始后将实时录制麦克风音频，用于会议语音的识别与翻译。音频仅在本机处理，不会上传。',
+      openSettings: '打开系统设置',
+      title: '需要麦克风权限',
+    },
     onboarding: {
       configure: '简单配置后即可开始',
       start: '开始使用',
@@ -298,6 +338,16 @@ const messages = {
       themeSystem: '跟隨系統',
       translate: '翻譯',
       viewArchives: '封存記錄',
+    },
+    mic: {
+      allow: '允許並開始',
+      cancel: '取消',
+      deniedDesc:
+        '麥克風權限已被拒絕。請在「系統設定 › 隱私權與安全性 › 麥克風」中允許 Meeting Translator 後再試。',
+      deniedTitle: '麥克風權限被拒絕',
+      desc: '開始後會即時擷取麥克風音訊，用於會議語音的辨識與翻譯。音訊僅在本機處理，不會上傳。',
+      openSettings: '開啟系統設定',
+      title: '需要麥克風權限',
     },
     onboarding: {
       configure: '簡單設定後即可開始',

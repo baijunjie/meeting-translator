@@ -107,6 +107,9 @@ export type UiLang = 'zh' | 'zh-Hant' | 'ja' | 'en' | 'ko';
 /** 主题偏好：浅色 / 深色 / 跟随系统 */
 export type ThemePref = 'light' | 'dark' | 'system';
 
+/** 麦克风权限状态（macOS systemPreferences.getMediaAccessStatus） */
+export type MicPermission = 'granted' | 'denied' | 'restricted' | 'not-determined' | 'unknown';
+
 /** 归档里的一行对话 */
 export interface ArchiveLine {
   time: string;
@@ -150,6 +153,10 @@ export interface MeetingApi {
   sendAudio(samples: Float32Array): void;
   /** 开/关翻译（目标恒为母语） */
   setTranslateEnabled(enabled: boolean): void;
+  /** 查询麦克风权限状态（用于在请求权限前先弹说明） */
+  getMicStatus(): Promise<MicPermission>;
+  /** 打开系统设置的麦克风隐私页（macOS） */
+  openMicSettings(): void;
   getSettings(): Promise<AppSettings>;
   saveSettings(settings: AppSettings): Promise<AppSettings>;
   /** 首次启动：查询 ASR 模型是否已就绪 */
