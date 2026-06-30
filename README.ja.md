@@ -127,9 +127,3 @@ flowchart LR
 macOS では ASR と翻訳はそれぞれ独立した Electron `utilityProcess` で動作します。重いネイティブ推論が UI をブロックせず、ネイティブクラッシュや巨大なメモリ確保もそのプロセス内に隔離され、アプリ全体を巻き込みません。Web で対応する隔離はタスクごとの Web Worker、iOS ではネイティブプラグインが担います。
 
 文字起こしは [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx)（ONNX Runtime）、macOS と Web のローカル翻訳は [Transformers.js](https://github.com/huggingface/transformers.js) で Meta M2M100-418M（MIT）を実行します。翻訳は `@mt/core` の `Translator` インターフェースの背後にあり（モデルごとに 1 つの spec）——より強力なローカルモデル、Apple のフレームワーク、クラウド API への差し替えは実装を 1 つ追加するだけです。
-
-## ロードマップ
-
-- [ ] より高品質なローカル翻訳（Qwen2.5 などの LLM バックエンド）
-- [ ] 議事録のエクスポート（Markdown / SRT）
-- [ ] 配布用のコード署名と公証

@@ -127,9 +127,3 @@ flowchart LR
 在 macOS 上，ASR 与翻译各自跑在独立的 Electron `utilityProcess`：重推理不阻塞 UI，原生崩溃或超大内存分配也只影响该子进程，不会拖垮整个应用。网页上对应的隔离是每个任务一个 Web Worker；iOS 上则由原生插件承担。
 
 转写引擎为 [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx)（ONNX Runtime）；macOS 与网页的本地翻译用 [Transformers.js](https://github.com/huggingface/transformers.js) 跑 Meta M2M100-418M（MIT）。翻译封装在 `@mt/core` 的 `Translator` 接口之后（每个模型一份 spec）——换更强的本地模型、Apple 框架或云 API，只是新增一个实现。
-
-## Roadmap
-
-- [ ] 更高质量本地翻译（如 Qwen2.5 等 LLM 后端）
-- [ ] 会议记录导出（Markdown / SRT）
-- [ ] 发布用的代码签名与公证

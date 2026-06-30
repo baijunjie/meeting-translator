@@ -127,9 +127,3 @@ flowchart LR
 On macOS, ASR and translation each run in their own Electron `utilityProcess`, so heavy native inference never blocks the UI — and a native crash (or oversized allocation) is isolated to that process instead of taking down the app. On web the equivalent isolation is a Web Worker per task; on iOS the work happens in the native plugin.
 
 Transcription uses [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) (ONNX Runtime); local translation uses [Transformers.js](https://github.com/huggingface/transformers.js) running Meta M2M100-418M (MIT) on macOS and web. Translation sits behind the `Translator` interface in `@mt/core` (one spec per model) — swapping in another local model, Apple's framework, or a cloud API is just another implementation.
-
-## Roadmap
-
-- [ ] Higher-quality local translation (e.g. an LLM backend like Qwen2.5)
-- [ ] Export transcripts (Markdown / SRT)
-- [ ] Code signing & notarization for distribution
