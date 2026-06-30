@@ -25,25 +25,34 @@
 
 Before requesting the microphone, the app first explains what it's used for; macOS then shows its own permission prompt.
 
+## Project structure
+
+A **pnpm-workspace monorepo** — shared logic/UI, one package per platform:
+
+- `packages/core` (`@mt/core`) — platform-agnostic TypeScript: domain types, settings/archive logic, translation (`Translator` + cloud + Simplified/Traditional conversion), the ASR model registry, and the platform-capability bridge interface (`AppBridge`).
+- `packages/ui` (`@mt/ui`) — shared Vue 3 UI; reaches the platform only through an injected `AppBridge` (no `window.api`).
+- `apps/macos` (`@mt/macos`) — the Electron app; implements `AppBridge` (audio capture, ASR + translation in utilityProcess workers, fs storage) and hosts `@mt/ui`.
+- `apps/ios` (`@mt/ios`) — a Capacitor app (scaffold) hosting the same `@mt/ui` in a WebView, with a native ASR plugin — see `apps/ios/native-plugin/INTEGRATION.md`.
+- `assets/` — shared brand source (`icon.svg` / `icon.png`); each app generates its own icon format from it.
+
 ## Development
 
-Built with **electron-vite** (Vite + Vue 3 + Naive UI). Main/preload/renderer all in TypeScript under `src/`.
+Requires **pnpm**. Built with **electron-vite** (Vite + Vue 3 + Naive UI), all TypeScript.
 
 ```bash
-npm install
-npm run dev               # dev with hot reload
-# production preview: npm run build && npm start
+pnpm install
+pnpm dev               # run the macOS app with hot reload (→ @mt/macos)
 ```
 
 On first launch the app downloads the ASR models itself (a setup screen); translation downloads on first use.
 
-Other scripts: `npm run build`, `npm run type-check`, `npm run clean`.
+Other scripts: `pnpm build`, `pnpm type-check`. Per-package: `pnpm --filter @mt/macos <script>` (e.g. `clean`, `test-translate`).
 
 ### Packaging (macOS)
 
 ```bash
-npm run dist        # build + electron-builder → release/*.dmg (arm64)
-npm run dist:dir    # unpacked .app only (faster, for debugging)
+pnpm dist        # build + electron-builder → apps/macos/release/*.dmg (arm64)
+pnpm dist:dir    # unpacked .app only (faster, for debugging)
 ```
 
 The packaged app is currently **unsigned** — to open it, right-click → Open (or run `xattr -dr com.apple.quarantine` on the app). For public distribution, sign & notarize with an Apple Developer ID. Models are not bundled; they download to the user's app-data folder on first use.
@@ -92,7 +101,9 @@ flowchart LR
 
 ASR and translation each run in their own Electron `utilityProcess`, so heavy native inference never blocks the UI — and a native crash (or oversized allocation) is isolated to that process instead of taking down the app.
 
-Transcription uses [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) (ONNX Runtime, native N-API module); translation uses [Transformers.js](https://github.com/huggingface/transformers.js) running Meta M2M100-418M (MIT), also on onnxruntime. Translation sits behind the `Translator` interface in `src/main/translation/` (one spec per model) — swapping in another local model or a cloud API is just another implementation.
+The same `@mt/ui` runs on iOS in a Capacitor WebView; only the `AppBridge` implementation differs (native ASR plugin + cloud translation).
+
+Transcription uses [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) (ONNX Runtime, native N-API module); translation uses [Transformers.js](https://github.com/huggingface/transformers.js) running Meta M2M100-418M (MIT), also on onnxruntime. Translation sits behind the `Translator` interface in `@mt/core` (one spec per model), with the local engine implemented in `apps/macos` — swapping in another local model or a cloud API is just another implementation.
 
 ## Roadmap
 

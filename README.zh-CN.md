@@ -25,25 +25,34 @@
 
 请求麦克风前，应用会先说明用途；随后 macOS 才弹出系统授权提示。
 
+## 项目结构
+
+**pnpm workspace monorepo**——共享逻辑/UI，每个平台一个包：
+
+- `packages/core`（`@mt/core`）——平台无关 TS：领域类型、设置/归档逻辑、翻译（`Translator` + 云端 + 简繁转换）、ASR 模型清单、平台能力桥接接口 `AppBridge`。
+- `packages/ui`（`@mt/ui`）——共享 Vue 3 界面；仅通过注入的 `AppBridge` 触达平台（不直接用 `window.api`）。
+- `apps/macos`（`@mt/macos`）——Electron 应用；以 utilityProcess 子进程实现 ASR/翻译、采音、fs 存储等 `AppBridge`，并承载 `@mt/ui`。
+- `apps/ios`（`@mt/ios`）——Capacitor 应用（骨架），WebView 承载同一套 `@mt/ui`，识别由原生插件实现——见 `apps/ios/native-plugin/INTEGRATION.md`。
+- `assets/`——共享品牌源（`icon.svg` / `icon.png`），各平台由它生成自己的图标格式。
+
 ## 开发
 
-基于 **electron-vite**（Vite + Vue 3 + Naive UI）。主进程 / preload / 渲染层均为 TypeScript，位于 `src/`。
+需要 **pnpm**。基于 **electron-vite**（Vite + Vue 3 + Naive UI），全 TypeScript。
 
 ```bash
-npm install
-npm run dev               # 开发（热更新）
-# 生产预览：npm run build && npm start
+pnpm install
+pnpm dev               # 跑 macOS 应用（热更新，→ @mt/macos）
 ```
 
 首次启动时应用会自行下载 ASR 模型（有下载页）；翻译模型在首次使用时下载。
 
-其他脚本：`npm run build`、`npm run type-check`、`npm run clean`。
+其他脚本：`pnpm build`、`pnpm type-check`。单包：`pnpm --filter @mt/macos <script>`（如 `clean`、`test-translate`）。
 
 ### 打包（macOS）
 
 ```bash
-npm run dist        # 构建 + electron-builder → release/*.dmg（arm64）
-npm run dist:dir    # 仅生成未压缩 .app（更快，调试用）
+pnpm dist        # 构建 + electron-builder → apps/macos/release/*.dmg（arm64）
+pnpm dist:dir    # 仅生成未压缩 .app（更快，调试用）
 ```
 
 打包产物当前**未签名**——打开需右键 →「打开」（或对 app 执行 `xattr -dr com.apple.quarantine`）。正式公开发布请用 Apple Developer ID 签名并公证。模型不随包分发，首次使用时下载到用户数据目录。
@@ -92,7 +101,9 @@ flowchart LR
 
 ASR 与翻译各自跑在独立的 Electron `utilityProcess`：重推理不阻塞 UI，原生崩溃或超大内存分配也只影响该子进程，不会拖垮整个应用。
 
-转写引擎为 [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx)（ONNX Runtime，原生 N-API 模块）；翻译用 [Transformers.js](https://github.com/huggingface/transformers.js) 跑 Meta M2M100-418M（MIT），同样基于 onnxruntime。翻译能力封装在 `src/main/translation/` 的 `Translator` 接口之后（每个模型一份 spec）——换更强的本地模型或接云 API，只是新增一个实现。
+同一套 `@mt/ui` 也在 iOS 的 Capacitor WebView 中运行，差别仅在 `AppBridge` 的实现（原生识别插件 + 云端翻译）。
+
+转写引擎为 [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx)（ONNX Runtime，原生 N-API 模块）；翻译用 [Transformers.js](https://github.com/huggingface/transformers.js) 跑 Meta M2M100-418M（MIT），同样基于 onnxruntime。翻译封装在 `@mt/core` 的 `Translator` 接口之后（每个模型一份 spec），本地引擎实现在 `apps/macos`——换更强的本地模型或接云 API，只是新增一个实现。
 
 ## Roadmap
 

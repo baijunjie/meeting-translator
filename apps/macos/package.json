@@ -1,0 +1,47 @@
+{
+  "name": "@mt/macos",
+  "version": "0.1.0-beta.1",
+  "description": "Local real-time meeting transcription for macOS",
+  "main": "./out/main/index.js",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "start": "electron-vite preview",
+    "type-check": "vue-tsc --noEmit -p tsconfig.json",
+    "clean": "bash scripts/clean.sh",
+    "clean:models": "bash scripts/clean.sh --models",
+    "clean:settings": "bash scripts/clean.sh --settings",
+    "clean:all": "bash scripts/clean.sh --all",
+    "test-pipeline": "node scripts/build-test.mjs test/pipeline.ts && node dist-test/test/pipeline.js",
+    "test-translate": "node scripts/build-test.mjs test/translate.ts && node dist-test/test/translate.js",
+    "icons": "node scripts/gen-icon.mjs",
+    "dist": "node scripts/package-mac.mjs",
+    "dist:dir": "node scripts/package-mac.mjs --dir"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@huggingface/transformers": "^4.2.0",
+    "chinese-conv": "catalog:",
+    "sherpa-onnx-node": "^1.13.2"
+  },
+  "devDependencies": {
+    "@lucide/vue": "catalog:",
+    "@mt/core": "workspace:*",
+    "@mt/ui": "workspace:*",
+    "@tailwindcss/vite": "catalog:",
+    "@types/node": "catalog:",
+    "@vitejs/plugin-vue": "catalog:",
+    "electron": "^42.4.0",
+    "electron-builder": "^25.1.8",
+    "electron-vite": "^5.0.0",
+    "naive-ui": "catalog:",
+    "tailwindcss": "catalog:",
+    "typescript": "catalog:",
+    "vite": "catalog:",
+    "vue": "catalog:",
+    "vue-i18n": "catalog:",
+    "vue-tsc": "catalog:"
+  }
+}

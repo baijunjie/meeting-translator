@@ -1,0 +1,34 @@
+{
+  "name": "@mt/ios",
+  "version": "0.1.0-beta.1",
+  "description": "Meeting Translator — iOS (Capacitor) app hosting @mt/ui in a WebView",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "vite build",
+    "type-check": "vue-tsc --noEmit -p tsconfig.json",
+    "cap:sync": "cap sync ios",
+    "fetch:frameworks": "node scripts/fetch-frameworks.mjs",
+    "icons": "node scripts/gen-icons.mjs",
+    "gen:models": "node native-plugin/scripts/gen-asr-models-swift.mjs"
+  },
+  "dependencies": {
+    "@capacitor/core": "^7.0.0",
+    "@capacitor/ios": "^7.6.7",
+    "@capacitor/preferences": "^7.0.0",
+    "@mt/core": "workspace:*",
+    "@mt/ui": "workspace:*"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^7.0.0",
+    "esbuild": "^0.28.1",
+    "sharp": "^0.32.6",
+    "@tailwindcss/vite": "catalog:",
+    "@types/node": "catalog:",
+    "@vitejs/plugin-vue": "catalog:",
+    "typescript": "catalog:",
+    "vite": "catalog:",
+    "vue": "catalog:",
+    "vue-tsc": "catalog:"
+  }
+}

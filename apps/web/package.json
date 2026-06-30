@@ -1,0 +1,32 @@
+{
+  "name": "@mt/web",
+  "version": "0.1.0-beta.1",
+  "description": "Meeting Translator — installable browser PWA hosting @mt/ui",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "type-check": "vue-tsc --noEmit -p tsconfig.json",
+    "icons": "node scripts/gen-icons.mjs"
+  },
+  "dependencies": {
+    "@huggingface/transformers": "^4.2.0",
+    "@mt/core": "workspace:*",
+    "@mt/ui": "workspace:*",
+    "idb": "^8.0.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "catalog:",
+    "@types/node": "catalog:",
+    "@vitejs/plugin-vue": "catalog:",
+    "sharp": "^0.32.6",
+    "tailwindcss": "catalog:",
+    "typescript": "catalog:",
+    "vite": "catalog:",
+    "vite-plugin-pwa": "^1.0.0",
+    "vue": "catalog:",
+    "vue-tsc": "catalog:"
+  }
+}

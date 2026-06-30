@@ -1,12 +1,17 @@
 node_modules/
-models/
 dist/
-dist-test/
-out/
-release/
 *.log
 .DS_Store
 .idea/
-test-audio/
 docs/dev-memory/
-build/icon.icns
+
+# macOS 打包中转：pnpm deploy 导出的自包含副本
+/.deploy-macos/
+
+# macOS app (apps/macos) build artifacts, downloaded models and packaging output
+apps/macos/out/
+apps/macos/release/
+apps/macos/models/
+apps/macos/dist-test/
+apps/macos/test-audio/
+apps/macos/build/icon.icns

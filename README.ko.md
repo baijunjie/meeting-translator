@@ -25,25 +25,34 @@
 
 마이크 접근을 요청하기 전에 앱이 먼저 용도를 설명합니다. 이후 macOS가 자체 권한 대화상자를 표시합니다.
 
+## 프로젝트 구조
+
+**pnpm 워크스페이스 monorepo** — 공유 로직/UI, 플랫폼별 1개 패키지:
+
+- `packages/core`(`@mt/core`) — 플랫폼 비의존 TS: 도메인 타입, 설정/보관 로직, 번역(`Translator` + 클라우드 + 간체/번체 변환), ASR 모델 목록, 플랫폼 능력 브리지 `AppBridge`.
+- `packages/ui`(`@mt/ui`) — 공유 Vue 3 UI; 주입된 `AppBridge`를 통해서만 플랫폼에 접근(`window.api` 직접 참조 없음).
+- `apps/macos`(`@mt/macos`) — Electron 앱; utilityProcess로 ASR/번역·녹음·fs 저장 등 `AppBridge`를 구현하고 `@mt/ui`를 호스팅.
+- `apps/ios`(`@mt/ios`) — Capacitor 앱(스캐폴드); 동일한 `@mt/ui`를 WebView로 호스팅, 인식은 네이티브 플러그인 — `apps/ios/native-plugin/INTEGRATION.md` 참고.
+- `assets/` — 공유 브랜드 소스(`icon.svg` / `icon.png`); 각 앱이 여기서 자체 아이콘 포맷을 생성.
+
 ## 개발
 
-**electron-vite**(Vite + Vue 3 + Naive UI)로 구축. 메인 / preload / 렌더러 모두 TypeScript(`src/`).
+**pnpm** 필요. **electron-vite**(Vite + Vue 3 + Naive UI), 전부 TypeScript.
 
 ```bash
-npm install
-npm run dev               # 개발(핫 리로드)
-# 프로덕션 미리보기: npm run build && npm start
+pnpm install
+pnpm dev               # macOS 앱을 핫 리로드로 실행(→ @mt/macos)
 ```
 
 첫 실행 시 앱이 ASR 모델을 자동으로 다운로드합니다(설치 화면). 번역 모델은 최초 사용 시 다운로드됩니다.
 
-기타 스크립트: `npm run build`, `npm run type-check`, `npm run clean`.
+기타 스크립트: `pnpm build`, `pnpm type-check`. 패키지 단위: `pnpm --filter @mt/macos <script>`(예: `clean`, `test-translate`).
 
 ### 패키징(macOS)
 
 ```bash
-npm run dist        # 빌드 + electron-builder → release/*.dmg (arm64)
-npm run dist:dir    # 압축 해제된 .app만 (더 빠름, 디버깅용)
+pnpm dist        # 빌드 + electron-builder → apps/macos/release/*.dmg (arm64)
+pnpm dist:dir    # 압축 해제된 .app만 (더 빠름, 디버깅용)
 ```
 
 생성물은 현재 **서명되지 않음** — 열려면 우클릭 → 「열기」(또는 app에 `xattr -dr com.apple.quarantine` 실행). 공개 배포 시 Apple Developer ID로 서명 및 공증하세요. 모델은 동봉되지 않으며 최초 사용 시 사용자 데이터 폴더로 다운로드됩니다.
@@ -92,7 +101,9 @@ flowchart LR
 
 ASR과 번역은 각각 독립된 Electron `utilityProcess`에서 실행됩니다. 무거운 네이티브 추론이 UI를 막지 않고, 네이티브 크래시나 과도한 메모리 할당도 해당 프로세스에만 격리되어 앱 전체를 끌어내리지 않습니다.
 
-전사는 [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx)(ONNX Runtime, 네이티브 N-API 모듈), 번역은 [Transformers.js](https://github.com/huggingface/transformers.js)로 Meta M2M100-418M(MIT)을 실행합니다(역시 onnxruntime 기반). 번역 기능은 `src/main/translation/`의 `Translator` 인터페이스 뒤에 있어(모델마다 spec 하나) — 더 강력한 로컬 모델이나 클라우드 API로 교체하려면 구현 하나만 추가하면 됩니다.
+동일한 `@mt/ui`가 iOS의 Capacitor WebView에서도 동작하며, 차이는 `AppBridge` 구현뿐입니다(네이티브 인식 플러그인 + 클라우드 번역).
+
+전사는 [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx)(ONNX Runtime, 네이티브 N-API 모듈), 번역은 [Transformers.js](https://github.com/huggingface/transformers.js)로 Meta M2M100-418M(MIT)을 실행합니다(역시 onnxruntime 기반). 번역은 `@mt/core`의 `Translator` 인터페이스 뒤에 있고(모델마다 spec 하나) 로컬 엔진 구현은 `apps/macos`에 있어 — 더 강력한 로컬 모델이나 클라우드 API로 교체하려면 구현 하나만 추가하면 됩니다.
 
 ## 로드맵
 

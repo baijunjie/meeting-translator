@@ -1,0 +1,621 @@
+//
+//  MeetingAsrPlugin.swift
+//  Meeting Translator — iOS on-device ASR Capacitor plugin.
+//
+//  On-device speech-to-text using sherpa-onnx (k2-fsa) v1.13.3:
+//    - Silero VAD segments speech from a 16 kHz mono Float32 mic stream.
+//    - SenseVoice (multilingual: zh/en/ja/ko/yue) offline-recognizes each segment.
+//  Mirrors the macOS reference pipeline (apps/macos/src/main/pipeline.ts): partial
+//  result while speaking (best-effort) + a finalized segment when the VAD closes a
+//  speech chunk. Audio capture is AVAudioEngine; conversion to 16 kHz mono Float32 is
+//  done with AVAudioConverter.
+//
+//  Depends on the vendored sherpa-onnx Swift wrapper (SherpaOnnx.swift) + the
+//  sherpa-onnx.xcframework / onnxruntime.xcframework. See ../INTEGRATION.md for the
+//  exact Xcode wiring (these are NOT auto-linked by `cap sync`).
+//
+//  Contract (must match ../definitions.ts):
+//    Methods : start(), stop(), getSetupStatus(), downloadModels(), getMicStatus(), openMicSettings()
+//    Events  : "partial"  -> { text: String }
+//              "segment"  -> { id: Int, text: String, lang: String, start: Double, duration: Double }
+//              "status"   -> { state: "loading"|"running"|"error"|"stopped", error?: String }
+//              "setupProgress" -> { loaded: Int, total: Int }
+//
+
+import Foundation
+import AVFoundation
+import UIKit
+import Capacitor
+
+@objc(MeetingAsrPlugin)
+public class MeetingAsrPlugin: CAPPlugin, CAPBridgedPlugin {
+  // Capacitor 6+ 通过 CAPBridgedPlugin 发现插件（取代旧的 .m / CAP_PLUGIN 宏）
+  public let identifier = "MeetingAsrPlugin"
+  public let jsName = "MeetingAsr"
+  public let pluginMethods: [CAPPluginMethod] = [
+    CAPPluginMethod(name: "start", returnType: CAPPluginReturnPromise),
+    CAPPluginMethod(name: "stop", returnType: CAPPluginReturnPromise),
+    CAPPluginMethod(name: "getSetupStatus", returnType: CAPPluginReturnPromise),
+    CAPPluginMethod(name: "downloadModels", returnType: CAPPluginReturnPromise),
+    CAPPluginMethod(name: "getMicStatus", returnType: CAPPluginReturnPromise),
+    CAPPluginMethod(name: "openMicSettings", returnType: CAPPluginReturnPromise),
+  ]
+
+  // MARK: - Tunables (mirror apps/macos/src/main/pipeline.ts intent)
+
+  /// SenseVoice / Silero VAD expect 16 kHz mono Float32.
+  private let sampleRate = 16_000
+  /// Silero VAD frame size (samples) — sherpa-onnx requires fixed 512-sample windows.
+  private let vadWindowSize = 512
+  /// VAD ring-buffer length (seconds). Matches macOS (long enough for whole utterances).
+  private let vadBufferSeconds: Float = 120
+  /// Min continuous silence before a segment is closed (s). Smaller = snappier finals.
+  private let minSilenceSeconds: Float = 0.35
+  /// Earlier speech onset to avoid clipping the first syllable.
+  private let vadThreshold: Float = 0.35
+  private let minSpeechSeconds: Float = 0.25
+  /// Hard cap so a non-stop talker still gets periodic finals (sherpa cuts internally).
+  private let maxSpeechSeconds: Float = 7.0
+  /// How often to run a best-effort partial over the in-progress speech buffer (s).
+  private let partialIntervalSeconds: Double = 0.6
+
+  // MARK: - Capacitor / threading state
+
+  private let audioEngine = AVAudioEngine()
+  /// All recognizer + VAD work runs here, off the audio render thread.
+  private let asrQueue = DispatchQueue(label: "io.github.baijunjie.meetingtranslator.asr")
+
+  private var recognizer: SherpaOnnxOfflineRecognizer?
+  private var vad: SherpaOnnxVoiceActivityDetectorWrapper?
+
+  private var isRunning = false
+  private var segmentId = 0
+
+  /// Carry-over of <512-sample remainders between buffers so VAD always gets full windows.
+  private var pendingSamples: [Float] = []
+  /// Raw 16 kHz samples since the current speech segment (best-effort) started — used for partials.
+  private var speechBuffer: [Float] = []
+  private var wasSpeechDetected = false
+  /// Total 16 kHz samples consumed since start() — used for partial throttling.
+  private var totalSamples = 0
+  private var lastPartialAtSamples = 0
+
+  // MARK: - Capacitor methods (match ../definitions.ts)
+
+  /// Start on-device ASR: ensure models loaded, request mic, open capture, begin recognition.
+  @objc func start(_ call: CAPPluginCall) {
+    notifyListeners("status", data: ["state": "loading"])
+
+    requestMicPermission { [weak self] granted in
+      guard let self = self else { return }
+      guard granted else {
+        let msg = "microphone permission denied"
+        self.notifyListeners("status", data: ["state": "error", "error": msg])
+        call.resolve(["ok": false, "error": msg])
+        return
+      }
+      // Build recognizer/VAD + open the mic on the ASR queue (model load can take seconds).
+      self.asrQueue.async {
+        do {
+          try self.ensureEngineLoaded()
+          self.resetPipelineState()
+          try self.startCapture()
+          self.isRunning = true
+          self.notifyListeners("status", data: ["state": "running"])
+          call.resolve(["ok": true])
+        } catch {
+          let msg = error.localizedDescription
+          self.notifyListeners("status", data: ["state": "error", "error": msg])
+          call.resolve(["ok": false, "error": msg])
+        }
+      }
+    }
+  }
+
+  /// Stop capture + recognition, flush any trailing segment, release the audio session.
+  @objc func stop(_ call: CAPPluginCall) {
+    stopCapture()
+    asrQueue.async { [weak self] in
+      guard let self = self else { call.resolve(["ok": true]); return }
+      self.flushTrailingSegment()
+      self.isRunning = false
+      self.notifyListeners("partial", data: ["text": ""])
+      self.notifyListeners("status", data: ["state": "stopped"])
+      call.resolve(["ok": true])
+    }
+  }
+
+  /// Report whether the ASR model files are present in the writable models dir.
+  @objc func getSetupStatus(_ call: CAPPluginCall) {
+    call.resolve(["asrReady": modelsReady()])
+  }
+
+  /// Ensure ASR models are available; download (SenseVoice + Silero VAD) on first run.
+  /// Progress is reported via the "setupProgress" event; resolves when complete.
+  @objc func downloadModels(_ call: CAPPluginCall) {
+    if modelsReady() {
+      call.resolve(["ok": true])
+      return
+    }
+    asrQueue.async { [weak self] in
+      guard let self = self else { return }
+      do {
+        try self.downloadAllModels()
+        call.resolve(["ok": true])
+      } catch {
+        call.resolve(["ok": false, "error": error.localizedDescription])
+      }
+    }
+  }
+
+  /// Map AVAudioSession record permission to the JS MicPermission strings.
+  @objc func getMicStatus(_ call: CAPPluginCall) {
+    call.resolve(["status": currentMicPermission()])
+  }
+
+  /// Open the app's iOS Settings page so the user can grant microphone access.
+  @objc func openMicSettings(_ call: CAPPluginCall) {
+    DispatchQueue.main.async {
+      if let url = URL(string: UIApplication.openSettingsURLString) {
+        UIApplication.shared.open(url)
+      }
+      call.resolve()
+    }
+  }
+
+  // MARK: - Mic permission (iOS 17+ uses AVAudioApplication; older uses AVAudioSession)
+
+  private func requestMicPermission(_ completion: @escaping (Bool) -> Void) {
+    if #available(iOS 17.0, *) {
+      AVAudioApplication.requestRecordPermission { completion($0) }
+    } else {
+      AVAudioSession.sharedInstance().requestRecordPermission { completion($0) }
+    }
+  }
+
+  private func currentMicPermission() -> String {
+    // AVAudioApplication.recordPermission (iOS 17+) and AVAudioSession.RecordPermission are
+    // distinct enum types, so map each in its own branch rather than via a shared variable.
+    if #available(iOS 17.0, *) {
+      switch AVAudioApplication.shared.recordPermission {
+      case .granted: return "granted"
+      case .denied: return "denied"
+      case .undetermined: return "not-determined"
+      @unknown default: return "unknown"
+      }
+    } else {
+      switch AVAudioSession.sharedInstance().recordPermission {
+      case .granted: return "granted"
+      case .denied: return "denied"
+      case .undetermined: return "not-determined"
+      @unknown default: return "unknown"
+      }
+    }
+  }
+
+  // MARK: - Audio capture (AVAudioEngine -> 16 kHz mono Float32)
+
+  private func startCapture() throws {
+    let session = AVAudioSession.sharedInstance()
+    // .measurement minimizes system DSP for cleaner ASR input.
+    try session.setCategory(.record, mode: .measurement, options: [])
+    try session.setActive(true, options: [])
+
+    let input = audioEngine.inputNode
+    let inputFormat = input.outputFormat(forBus: 0)
+
+    guard let targetFormat = AVAudioFormat(
+      commonFormat: .pcmFormatFloat32,
+      sampleRate: Double(sampleRate),
+      channels: 1,
+      interleaved: false
+    ) else {
+      throw asrError("cannot create 16kHz target format")
+    }
+    guard let converter = AVAudioConverter(from: inputFormat, to: targetFormat) else {
+      throw asrError("cannot create audio converter")
+    }
+
+    input.installTap(onBus: 0, bufferSize: 2048, format: inputFormat) { [weak self] buffer, _ in
+      guard let self = self else { return }
+      guard let samples = self.convertToTargetSamples(buffer, converter: converter,
+                                                       targetFormat: targetFormat) else { return }
+      // Hand off to the ASR queue — never block the realtime audio thread.
+      self.asrQueue.async { self.processSamples(samples) }
+    }
+
+    audioEngine.prepare()
+    try audioEngine.start()
+  }
+
+  private func stopCapture() {
+    if audioEngine.isRunning {
+      audioEngine.inputNode.removeTap(onBus: 0)
+      audioEngine.stop()
+    }
+    try? AVAudioSession.sharedInstance().setActive(false, options: [.notifyOthersOnDeactivation])
+  }
+
+  /// Convert one hardware buffer to 16 kHz mono Float32 samples.
+  private func convertToTargetSamples(_ buffer: AVAudioPCMBuffer,
+                                      converter: AVAudioConverter,
+                                      targetFormat: AVAudioFormat) -> [Float]? {
+    let ratio = targetFormat.sampleRate / buffer.format.sampleRate
+    let capacity = AVAudioFrameCount(Double(buffer.frameLength) * ratio) + 1024
+    guard let out = AVAudioPCMBuffer(pcmFormat: targetFormat, frameCapacity: capacity) else {
+      return nil
+    }
+
+    var fed = false
+    var error: NSError?
+    converter.convert(to: out, error: &error) { _, status in
+      if fed {
+        status.pointee = .noDataNow
+        return nil
+      }
+      fed = true
+      status.pointee = .haveData
+      return buffer
+    }
+    if error != nil { return nil }
+    guard out.frameLength > 0, let channel = out.floatChannelData?[0] else { return nil }
+    return Array(UnsafeBufferPointer(start: channel, count: Int(out.frameLength)))
+  }
+
+  // MARK: - Recognition (sherpa-onnx: Silero VAD -> SenseVoice). Runs on asrQueue.
+
+  private func resetPipelineState() {
+    segmentId = 0
+    pendingSamples.removeAll(keepingCapacity: true)
+    speechBuffer.removeAll(keepingCapacity: true)
+    wasSpeechDetected = false
+    totalSamples = 0
+    lastPartialAtSamples = 0
+    vad?.reset()
+  }
+
+  /// Push 16 kHz samples through the VAD, emit partials while speaking, finalize
+  /// segments the VAD closes (min-silence or max-speech). Mirrors macOS intent.
+  private func processSamples(_ samples: [Float]) {
+    guard isRunning, let vad = vad else { return }
+
+    totalSamples += samples.count
+
+    // Feed VAD in fixed 512-sample windows; carry the remainder to the next buffer.
+    pendingSamples.append(contentsOf: samples)
+    var offset = 0
+    while offset + vadWindowSize <= pendingSamples.count {
+      let window = Array(pendingSamples[offset..<(offset + vadWindowSize)])
+      vad.acceptWaveform(samples: window)
+      offset += vadWindowSize
+    }
+    if offset > 0 {
+      pendingSamples.removeFirst(offset)
+    }
+
+    let speaking = vad.isSpeechDetected()
+    if speaking {
+      if !wasSpeechDetected {
+        // Onset of a new speech run.
+        wasSpeechDetected = true
+        speechBuffer.removeAll(keepingCapacity: true)
+        lastPartialAtSamples = 0
+      }
+      speechBuffer.append(contentsOf: samples)
+      maybeEmitPartial()
+    } else if wasSpeechDetected {
+      // Silence resumed — wait for the VAD to actually close the segment(s) below.
+      wasSpeechDetected = false
+    }
+
+    // Drain any speech segments the VAD has finalized (min-silence / max-speech reached).
+    while !vad.isEmpty() {
+      let segment = vad.front()
+      vad.pop()
+      finalizeSegment(samples: segment.samples, startSample: segment.start)
+      // A real final landed; clear the in-progress partial.
+      notifyListeners("partial", data: ["text": ""])
+      speechBuffer.removeAll(keepingCapacity: true)
+      lastPartialAtSamples = 0
+    }
+  }
+
+  /// Best-effort live partial over the in-progress speech buffer (throttled).
+  private func maybeEmitPartial() {
+    guard let recognizer = recognizer, !speechBuffer.isEmpty else { return }
+    let gap = Int(partialIntervalSeconds * Double(sampleRate))
+    if totalSamples - lastPartialAtSamples < gap { return }
+    lastPartialAtSamples = totalSamples
+
+    let result = recognizer.decode(samples: speechBuffer, sampleRate: sampleRate)
+    let text = cleanAsrText(result.text)
+    if !text.isEmpty {
+      notifyListeners("partial", data: ["text": text])
+    }
+  }
+
+  /// On stop(): flush the VAD and finalize any segment still buffered.
+  private func flushTrailingSegment() {
+    guard let vad = vad else { return }
+    vad.flush()
+    while !vad.isEmpty() {
+      let segment = vad.front()
+      vad.pop()
+      finalizeSegment(samples: segment.samples, startSample: segment.start)
+    }
+    speechBuffer.removeAll(keepingCapacity: true)
+    wasSpeechDetected = false
+  }
+
+  /// Recognize one finalized speech segment and emit it.
+  /// `startSample` is the VAD's index relative to the start of the session.
+  private func finalizeSegment(samples: [Float], startSample: Int) {
+    guard let recognizer = recognizer, !samples.isEmpty else { return }
+    let result = recognizer.decode(samples: samples, sampleRate: sampleRate)
+    let text = cleanAsrText(result.text)
+    // Skip empty / punctuation-only segments (short noises often decode to "。").
+    guard hasLetterOrNumber(text) else { return }
+
+    let id = segmentId
+    segmentId += 1
+    let start = Double(startSample) / Double(sampleRate)
+    let duration = Double(samples.count) / Double(sampleRate)
+    notifyListeners("segment", data: [
+      "id": id,
+      "text": text,
+      // SenseVoice lang short code: zh/en/ja/yue/ko. Defensively strip any <|..|>
+      "lang": normalizeLang(result.lang),  // wrapping so output matches macOS's normalized form.
+      "start": start,
+      "duration": duration,
+    ])
+  }
+
+  // MARK: - Engine setup
+
+  private func ensureEngineLoaded() throws {
+    if recognizer != nil && vad != nil { return }
+    guard modelsReady() else {
+      throw asrError("ASR models missing; call downloadModels() first")
+    }
+    let root = modelsDir()
+    let senseVoiceModel = root.appendingPathComponent(AsrModels.senseVoiceDir)
+      .appendingPathComponent("model.int8.onnx").path
+    let tokens = root.appendingPathComponent(AsrModels.senseVoiceDir)
+      .appendingPathComponent("tokens.txt").path
+    let vadModel = root.appendingPathComponent("silero_vad.onnx").path
+
+    // ---- SenseVoice offline recognizer (multilingual, ITN on). ----
+    let featConfig = sherpaOnnxFeatureConfig(sampleRate: sampleRate, featureDim: 80)
+    let senseVoice = sherpaOnnxOfflineSenseVoiceModelConfig(
+      model: senseVoiceModel,
+      language: "",                       // auto-detect language
+      useInverseTextNormalization: true
+    )
+    let modelConfig = sherpaOnnxOfflineModelConfig(
+      tokens: tokens,
+      numThreads: 2,
+      debug: 0,
+      senseVoice: senseVoice
+    )
+    var recognizerConfig = sherpaOnnxOfflineRecognizerConfig(
+      featConfig: featConfig,
+      modelConfig: modelConfig
+    )
+    recognizer = SherpaOnnxOfflineRecognizer(config: &recognizerConfig)
+
+    // ---- Silero VAD. ----
+    let sileroConfig = sherpaOnnxSileroVadModelConfig(
+      model: vadModel,
+      threshold: vadThreshold,
+      minSilenceDuration: minSilenceSeconds,
+      minSpeechDuration: minSpeechSeconds,
+      windowSize: vadWindowSize,
+      maxSpeechDuration: maxSpeechSeconds
+    )
+    var vadConfig = sherpaOnnxVadModelConfig(
+      sileroVad: sileroConfig,
+      sampleRate: Int32(sampleRate),
+      numThreads: 1,
+      debug: 0
+    )
+    vad = SherpaOnnxVoiceActivityDetectorWrapper(config: &vadConfig,
+                                                 buffer_size_in_seconds: vadBufferSeconds)
+
+    // Warm up: ONNX's first inference does graph optimization / thread-pool / allocation
+    // (can take seconds). Run it now (during "loading") so the first real utterance isn't slow.
+    if let recognizer = recognizer {
+      _ = recognizer.decode(samples: [Float](repeating: 0, count: sampleRate), sampleRate: sampleRate)
+    }
+  }
+
+  // MARK: - Models on disk (download-on-first-run; consumes @mt/core registry via AsrModels.swift)
+
+  /// Writable models root: Application Support/models (created on demand, excluded from iCloud backup).
+  private func modelsDir() -> URL {
+    let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+    let dir = base.appendingPathComponent("models", isDirectory: true)
+    if !FileManager.default.fileExists(atPath: dir.path) {
+      try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    }
+    return dir
+  }
+
+  private func modelsReady() -> Bool {
+    let root = modelsDir()
+    return AsrModels.requiredRelativePaths.allSatisfy { rel in
+      FileManager.default.fileExists(atPath: root.appendingPathComponent(rel).path)
+    }
+  }
+
+  /// Download every registry file (small first, big last) into the writable models dir,
+  /// reporting byte progress (dominated by the ~228MB SenseVoice int8 model).
+  private func downloadAllModels() throws {
+    let root = modelsDir()
+    let totalBytes = AsrModels.files.reduce(0) { $0 + $1.approxBytes }
+    var completedBytes = 0
+
+    for file in AsrModels.files {
+      let destDir = file.dir.isEmpty ? root : root.appendingPathComponent(file.dir, isDirectory: true)
+      try FileManager.default.createDirectory(at: destDir, withIntermediateDirectories: true)
+      let dest = destDir.appendingPathComponent(file.filename)
+      if FileManager.default.fileExists(atPath: dest.path) {
+        completedBytes += file.approxBytes
+        continue
+      }
+      let baseCompleted = completedBytes
+      try downloadFile(from: file.url, to: dest) { loadedThisFile in
+        self.notifyListeners("setupProgress", data: [
+          "loaded": baseCompleted + loadedThisFile,
+          "total": totalBytes,
+        ])
+      }
+      completedBytes += file.approxBytes
+    }
+
+    guard modelsReady() else {
+      throw asrError("ASR model verification failed after download")
+    }
+    notifyListeners("setupProgress", data: ["loaded": totalBytes, "total": totalBytes])
+  }
+
+  /// Synchronous (on asrQueue) URLSession download to a temp file, then atomic move.
+  /// Follows GitHub/HF redirects automatically. `onBytes` reports bytes written so far.
+  private func downloadFile(from urlString: String, to dest: URL,
+                            onBytes: @escaping (Int) -> Void) throws {
+    guard let url = URL(string: urlString) else {
+      throw asrError("invalid model URL: \(urlString)")
+    }
+    let semaphore = DispatchSemaphore(value: 0)
+    var resultError: Error?
+
+    let delegate = DownloadProgressDelegate(onBytes: onBytes)
+    let session = URLSession(configuration: .default, delegate: delegate, delegateQueue: nil)
+    let task = session.downloadTask(with: url) { location, response, error in
+      defer { semaphore.signal() }
+      if let error = error { resultError = error; return }
+      guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+        let code = (response as? HTTPURLResponse)?.statusCode ?? -1
+        resultError = self.asrError("download failed (HTTP \(code)): \(urlString)")
+        return
+      }
+      guard let location = location else {
+        resultError = self.asrError("download produced no file: \(urlString)")
+        return
+      }
+      // The temp file is purged as soon as this handler returns — move it here, not later.
+      do {
+        if FileManager.default.fileExists(atPath: dest.path) {
+          try FileManager.default.removeItem(at: dest)
+        }
+        try FileManager.default.moveItem(at: location, to: dest)
+      } catch {
+        resultError = error
+      }
+    }
+    task.resume()
+    semaphore.wait()
+    session.finishTasksAndInvalidate()
+
+    if let resultError = resultError { throw resultError }
+  }
+
+  // MARK: - Text post-processing (mirror apps/macos/src/main/pipeline.ts: cleanAsrText)
+
+  /// SenseVoice emits CJK token-by-token with spaces between; strip spaces between CJK chars.
+  private func stripCjkSpaces(_ text: String) -> String {
+    let scalars = Array(text.unicodeScalars)
+    var out = String.UnicodeScalarView()
+    var i = 0
+    while i < scalars.count {
+      let s = scalars[i]
+      if s == " ", i > 0, i + 1 < scalars.count,
+         isCjk(scalars[i - 1]), isCjk(scalars[i + 1]) {
+        i += 1
+        continue
+      }
+      out.append(s)
+      i += 1
+    }
+    return String(out)
+  }
+
+  private func isCjk(_ s: Unicode.Scalar) -> Bool {
+    let v = s.value
+    return (0x3040...0x30ff).contains(v)   // hiragana / katakana
+      || (0x3400...0x9fff).contains(v)     // CJK ext-A + unified ideographs
+      || (0xf900...0xfaff).contains(v)     // compatibility ideographs
+      || (0xff66...0xff9f).contains(v)     // half-width katakana
+  }
+
+  /// Collapse degenerate ASR repetition (1..4-char unit repeated >=4x -> keep 2).
+  private func collapseRepeats(_ text: String) -> String {
+    var chars = Array(text)
+    let repeatMin = 4, repeatKeep = 2, maxUnit = 4
+    var unit = 1
+    while unit <= maxUnit {
+      if chars.count >= unit * repeatMin {
+        var out: [Character] = []
+        var i = 0
+        while i < chars.count {
+          if i + unit > chars.count { out.append(chars[i]); i += 1; continue }
+          var count = 1
+          var j = i + unit
+          while j + unit <= chars.count && gramEqual(chars, i, j, unit) {
+            count += 1
+            j += unit
+          }
+          if count >= repeatMin {
+            for k in 0..<(repeatKeep * unit) { out.append(chars[i + k]) }
+            i = j
+          } else {
+            out.append(chars[i]); i += 1
+          }
+        }
+        chars = out
+      }
+      unit += 1
+    }
+    return String(chars)
+  }
+
+  private func gramEqual(_ chars: [Character], _ a: Int, _ b: Int, _ unit: Int) -> Bool {
+    for k in 0..<unit where chars[a + k] != chars[b + k] { return false }
+    return true
+  }
+
+  private func cleanAsrText(_ text: String) -> String {
+    return collapseRepeats(stripCjkSpaces(text.trimmingCharacters(in: .whitespacesAndNewlines)))
+  }
+
+  private func hasLetterOrNumber(_ text: String) -> Bool {
+    return text.unicodeScalars.contains { CharacterSet.alphanumerics.contains($0) }
+  }
+
+  /// SenseVoice language tag may surface as a bare code (zh/en/ja/yue/ko) or wrapped
+  /// (<|zh|>) depending on binding/version; strip <, |, > to match macOS's normalized form.
+  private func normalizeLang(_ lang: String) -> String {
+    return lang.filter { $0 != "<" && $0 != "|" && $0 != ">" }
+  }
+
+  // MARK: - Helpers
+
+  private func asrError(_ message: String) -> NSError {
+    return NSError(domain: "MeetingAsr", code: -1, userInfo: [NSLocalizedDescriptionKey: message])
+  }
+}
+
+/// Reports cumulative bytes written for a single download task.
+private final class DownloadProgressDelegate: NSObject, URLSessionDownloadDelegate {
+  private let onBytes: (Int) -> Void
+  init(onBytes: @escaping (Int) -> Void) { self.onBytes = onBytes }
+
+  func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask,
+                  didWriteData bytesWritten: Int64, totalBytesWritten: Int64,
+                  totalBytesExpectedToWrite: Int64) {
+    onBytes(Int(totalBytesWritten))
+  }
+
+  // Completion is handled by the downloadTask(with:completionHandler:) closure.
+  func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask,
+                  didFinishDownloadingTo location: URL) {}
+}
