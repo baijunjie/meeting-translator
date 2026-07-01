@@ -160,9 +160,14 @@ const trLineHeight = 'calc((var(--transcript-size) + 7px) * 1.45)';
               <div :class="[CUR_TEXT, 'font-semibold leading-snug text-neutral-900 dark:text-white']">
                 {{ latest.text }}
               </div>
-              <!-- 开启翻译时始终预留译文行高度：翻译进行中显示"翻译中"等待动画，译文到达后淡出换成译文；
-                   同语言等无需翻译的场景两者皆无、留空即可。全程不撑高，避免文字被顶动。 -->
-              <div v-if="translateOn" class="mt-3.5 max-sm:mt-2" :style="{ minHeight: trLineHeight }">
+              <!-- 有译文或翻译进行中时才渲染此区并预留一行译文高度：进行中显示"翻译中"等待动画、
+                   译文到达后原地淡入，全程不撑高、避免文字被顶动。
+                   同语言等无需翻译的场景两者皆无、此区不渲染，原文得以在方框内垂直居中。 -->
+              <div
+                v-if="translateOn && (latest.translation || latest.translating)"
+                class="mt-3.5 max-sm:mt-2"
+                :style="{ minHeight: trLineHeight }"
+              >
                 <transition name="tr-fade" mode="out-in">
                   <div
                     v-if="latest.translation"
