@@ -32,6 +32,7 @@ import type {
   ArchiveLine,
   ArchiveRecord,
   ArchiveSummary,
+  CloudTranslationConfig,
   StartResult,
   MicPermission,
   SetupStatus,
@@ -45,12 +46,21 @@ import type {
 import { WebAsr } from './asr/web-asr';
 import { areModelsCached, ensureModelsCached } from './asr/model-store';
 import { WebLocalTranslator, type ModelProgress } from './translation/web-local-translator';
+import { isIOS } from './platform';
 
 const DB_NAME = 'mt';
 const DB_VERSION = 1;
 const KV_STORE = 'kv'; // 设置等单键值
 const ARCHIVE_STORE = 'archives'; // 归档记录，keyPath = id
 const SETTINGS_KEY = 'settings';
+
+// iOS/iPadOS 的 WebKit 单标签页内存装不下本地翻译模型（与 ASR 共存会崩，且 4-bit 量化在
+// ORT-web 里也跑不起来），故这些设备不提供本地翻译、引擎恒为云端。所有产出 settings 的
+// 路径（读/写）统一经此收口，保证 getSettings 与翻译热路径看到的引擎一致，且不会去建本地模型。
+function applyPlatformConstraints(s: AppSettings): AppSettings {
+  if (isIOS()) s.translation.engine = 'cloud';
+  return s;
+}
 
 export function createWebBridge(): AppBridge {
   // —— UI 注册的回调（mountApp → registerTranscriptionListeners 时注入） ——
@@ -70,6 +80,26 @@ export function createWebBridge(): AppBridge {
   function getLocalTranslator(): WebLocalTranslator {
     if (!localTranslator) localTranslator = new WebLocalTranslator(M2M100_SPEC);
     return localTranslator;
+  }
+
+  // —— 本地模型预热（只下载/装载不翻译）：打开翻译开关时、以及启动时翻译已开着都会调，
+  //    进度经 onTranslationStatus 上报，第一句不再等下载。warmUp 幂等，重复调用安全。 ——
+  function warmUpLocalModel(): void {
+    translationStatusCb?.({ state: 'loading' });
+    getLocalTranslator()
+      .warmUp((p) => {
+        if (p.status === 'progress' && typeof p.progress === 'number') {
+          translationStatusCb?.({ state: 'loading', progress: p.progress / 100 });
+        }
+      })
+      .then(() => translationStatusCb?.({ state: 'ready' }))
+      .catch((e) => {
+        console.error('[translate:warmup]', e);
+        translationStatusCb?.({
+          state: 'error',
+          error: e instanceof Error ? e.message : String(e),
+        });
+      });
   }
 
   // —— IndexedDB 句柄（懒开，幂等） ——
@@ -99,13 +129,13 @@ export function createWebBridge(): AppBridge {
     } catch {
       raw = null;
     }
-    cachedSettings = withDefaults(raw, defaults);
+    cachedSettings = applyPlatformConstraints(withDefaults(raw, defaults));
     return cachedSettings;
   }
 
   // 写设置：补齐/校验后落盘并刷新缓存。所有写入路径（保存设置、切翻译开关）都走这里。
   async function writeSettings(next: AppSettings): Promise<AppSettings> {
-    cachedSettings = withDefaults(next, makeDefaults([]));
+    cachedSettings = applyPlatformConstraints(withDefaults(next, makeDefaults([])));
     await (await db()).put(KV_STORE, cachedSettings, SETTINGS_KEY);
     return cachedSettings;
   }
@@ -214,6 +244,9 @@ export function createWebBridge(): AppBridge {
   }
 
   const api: AppBridge = {
+    // iOS/iPadOS 上本地翻译模型装不下 WebKit 内存 → 只提供云端翻译（UI 据此隐藏本地引擎选项）。
+    localTranslationAvailable: !isIOS(),
+
     // ===== ASR 管线（Web，Phase 1 桩） =====
     async startPipeline(): Promise<StartResult> {
       // 真请求麦克风 + 建 AudioWorklet 采音；Phase 1 不识别（不回吐 segment）。
@@ -231,21 +264,7 @@ export function createWebBridge(): AppBridge {
       void writeSettings(cachedSettings).catch((e) => console.error('[settings:save]', e));
       // 打开开关即预热本地模型（云端无需下载）：进度经 onTranslationStatus 上报，第一句不再等下载。
       if (enabled && cachedSettings.translation.engine !== 'cloud') {
-        translationStatusCb?.({ state: 'loading' });
-        getLocalTranslator()
-          .warmUp((p) => {
-            if (p.status === 'progress' && typeof p.progress === 'number') {
-              translationStatusCb?.({ state: 'loading', progress: p.progress / 100 });
-            }
-          })
-          .then(() => translationStatusCb?.({ state: 'ready' }))
-          .catch((e) => {
-            console.error('[translate:warmup]', e);
-            translationStatusCb?.({
-              state: 'error',
-              error: e instanceof Error ? e.message : String(e),
-            });
-          });
+        warmUpLocalModel();
       }
     },
 
@@ -270,8 +289,23 @@ export function createWebBridge(): AppBridge {
     getSettings(): Promise<AppSettings> {
       return readSettingsOnce();
     },
-    saveSettings(settings: AppSettings): Promise<AppSettings> {
-      return writeSettings(settings);
+    async saveSettings(settings: AppSettings): Promise<AppSettings> {
+      const saved = await writeSettings(settings);
+      // 主页已无翻译开关，开/关改由设置里选「翻译方式」并保存触发：若开启且用本地引擎，保存即预热
+      // 本地模型（warmUp 幂等），第一句不再等下载。iOS 上 engine 已被收敛为 cloud，不会触发本地加载。
+      if (saved.translation.enabled && saved.translation.engine !== 'cloud') {
+        warmUpLocalModel();
+      }
+      return saved;
+    },
+    async testCloud(cfg: CloudTranslationConfig): Promise<{ ok: boolean; error?: string }> {
+      // 真打一次最小翻译请求验证端点/密钥/模型；source≠target 避免被同语言短路直接返回原文。
+      try {
+        await new CloudTranslator(cfg).translate('hello', { source: 'en', target: 'ja' });
+        return { ok: true };
+      } catch (e) {
+        return { ok: false, error: e instanceof Error ? e.message : String(e) };
+      }
     },
 
     // ===== 首次安装 / 模型下载（Phase 2） =====
@@ -341,7 +375,14 @@ export function createWebBridge(): AppBridge {
   };
 
   // 预读一次设置，填充缓存（异步，不阻塞返回）。与 UI 首次 getSettings() 共享同一次读。
-  void readSettingsOnce();
+  // 翻译已开 + 本地引擎则启动即预热：开关持久化为开时，重开/刷新不经过 setTranslateEnabled，
+  // 需在此预热，否则模型要拖到第一句才下载/装载。
+  // .then 在 IndexedDB 读完后才跑，届时 registerTranscriptionListeners 已注册好状态回调。
+  void readSettingsOnce().then((s) => {
+    if (s.translation.enabled && s.translation.engine !== 'cloud') {
+      warmUpLocalModel();
+    }
+  });
 
   return api;
 }

@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { app, BrowserWindow, ipcMain, shell, systemPreferences, utilityProcess, type UtilityProcess } from 'electron';
-import { M2M100_SPEC, planTranslation } from '@rt/core';
+import { M2M100_SPEC, planTranslation, CloudTranslator } from '@rt/core';
 import { loadSettings, saveSettings } from './settings';
 import { asrModelsReady, downloadAsrModels } from './model-downloader';
 import { listArchives, getArchive, saveArchive, deleteArchive } from './archives';
@@ -9,6 +9,7 @@ import translateWorkerPath from './translation/translate-process?modulePath';
 import type {
   StartResult,
   AppSettings,
+  CloudTranslationConfig,
   SegmentPayload,
   SetupStatus,
   AsrToMain,
@@ -271,15 +272,32 @@ ipcMain.handle('settings:save', (_event, next: AppSettings): AppSettings => {
     prev.cloud.apiKey !== cur.cloud.apiKey ||
     prev.cloud.model !== cur.cloud.model;
 
+  // 主页已无翻译开关，开启改由保存触发：翻译刚从关变开也要预热（引擎未变时也是）。
+  const enabledTurnedOn = !prev.enabled && cur.enabled;
+
   const saved = saveSettings(next);
   if (engineChanged) {
     reconfigureTranslate();
-    if (saved.translation.enabled) {
-      ensureTranslateChild().postMessage({ type: 'preheat' });
-    }
+  }
+  if (saved.translation.enabled && (engineChanged || enabledTurnedOn)) {
+    ensureTranslateChild().postMessage({ type: 'preheat' });
   }
   return saved;
 });
+
+// 云端配置连通性测试：主进程用 Node fetch 打一次最小翻译请求（无浏览器 CORS 限制，与实际云翻译
+// 同环境）。供设置页「测试连接」，与 Web/iOS 的 testCloud 行为一致。source≠target 避免被短路。
+ipcMain.handle(
+  'translation:test-cloud',
+  async (_event, cfg: CloudTranslationConfig): Promise<{ ok: boolean; error?: string }> => {
+    try {
+      await new CloudTranslator(cfg).translate('hello', { source: 'en', target: 'ja' });
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : String(e) };
+    }
+  },
+);
 
 ipcMain.handle('pipeline:stop', () => {
   asrChild?.postMessage({ type: 'flush' });

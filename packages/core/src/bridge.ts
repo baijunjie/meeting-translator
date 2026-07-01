@@ -11,6 +11,7 @@ import type {
   StartResult,
   MicPermission,
   AppSettings,
+  CloudTranslationConfig,
   SetupStatus,
   SetupProgress,
   ArchiveLine,
@@ -31,12 +32,24 @@ export interface AppBridge {
   stopPipeline(): Promise<{ ok: boolean }>;
   /** 开/关翻译（目标恒为母语） */
   setTranslateEnabled(enabled: boolean): void;
+  /**
+   * 本平台是否支持本地（离线）翻译引擎。省略/undefined 视为 true。
+   * Web 在 iOS/iPadOS 上为 false：WebKit 单标签页内存装不下本地翻译模型（会崩），只提供
+   * 云端翻译——设置里不展示本地引擎选项，引擎恒为 cloud（见 apps/web/src/bridge.ts）。
+   */
+  localTranslationAvailable?: boolean;
   /** 查询麦克风权限状态（用于在请求权限前先弹说明） */
   getMicStatus(): Promise<MicPermission>;
   /** 打开系统设置的麦克风隐私页（macOS） */
   openMicSettings(): void;
   getSettings(): Promise<AppSettings>;
   saveSettings(settings: AppSettings): Promise<AppSettings>;
+  /**
+   * 测试云端翻译配置是否可用：真实打一次最小请求，验证端点 / 密钥 / 模型。ok=false 时带 error。
+   * 仅在 JS 内直接 fetch 的平台实现（Web / iOS）；macOS 云翻译在独立进程，暂不提供（省略）。
+   * UI 仅在本方法存在时才显示「测试连接」按钮，并把云端引擎的「保存」前置为「测试通过」。
+   */
+  testCloud?(cfg: CloudTranslationConfig): Promise<{ ok: boolean; error?: string }>;
   /** 首次启动：查询 ASR 模型是否已就绪 */
   getSetupStatus(): Promise<SetupStatus>;
   /** 下载 ASR 模型，返回结果（失败带 error，供重试） */

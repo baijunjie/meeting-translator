@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { computed, ref, h } from 'vue';
-import { NButton, NSwitch, NProgress, NModal, NInput, NDropdown } from 'naive-ui';
+import { NButton, NProgress, NModal, NInput, NDropdown } from 'naive-ui';
 import type { DropdownMixedOption } from 'naive-ui/es/dropdown/src/interface';
 import { Settings, Trash2, Archive, Library, Eraser, LoaderCircle, TriangleAlert, MoreHorizontal, Mic, Square } from '@lucide/vue';
 import { useI18n } from 'vue-i18n';
-import { settings, setTranslateEnabled } from '../composables/useSettings';
+import { settings } from '../composables/useSettings';
 import {
   lines,
   partial,
@@ -73,29 +73,12 @@ async function confirmArchive(): Promise<void> {
   archiveModalOpen.value = false;
 }
 
-const translateOn = computed<boolean>({
-  get: () => settings.value?.translation.enabled ?? false,
-  set: (v) => setTranslateEnabled(v),
-});
+// 是否开启翻译：现由设置里的「翻译方式」决定（选了模型即启用），主页不再有独立开关。
+// 仍需此值让转写列表决定是否显示「翻译中」等待动画。
+const translateOn = computed<boolean>(() => settings.value?.translation.enabled ?? false);
 
-// 移动端「...」溢出菜单，翻译项内嵌开关
+// 移动端「...」溢出菜单（翻译开/关已移至设置的「翻译方式」，此处不再有翻译项）
 const mobileMenuOptions = computed<DropdownMixedOption[]>(() => [
-  {
-    type: 'render',
-    key: 'translate',
-    render: () =>
-      h('div', { class: 'flex items-center justify-between gap-8 px-3.5 py-1.5' }, [
-        h('span', { class: 'text-sm text-neutral-700 dark:text-neutral-200' }, t('main.translate')),
-        h(NSwitch, {
-          value: translateOn.value,
-          size: 'small',
-          'onUpdate:value': (v: boolean) => {
-            translateOn.value = v;
-          },
-        }),
-      ]),
-  },
-  { type: 'divider', key: 'd1' },
   { key: 'archive', label: t('main.archive'), icon: () => h(Archive, { size: 16 }), disabled: !hasContent.value },
   { key: 'delete', label: t('archive.delete'), icon: () => h(Trash2, { size: 16 }), disabled: !hasContent.value },
   { type: 'divider', key: 'd3' },
@@ -177,24 +160,25 @@ function openMicSettings(): void {
 
       <!-- 窄屏隐藏，改用下方「...」菜单与底部圆形录音按钮 -->
       <div class="flex items-center gap-3.5 max-sm:hidden">
-        <label class="flex items-center gap-2 text-[13px] text-neutral-500 dark:text-neutral-400">
+        <!-- 翻译状态（只读）：开/关在设置的「翻译方式」里选，主页不再有独立开关。
+             仅在翻译开启且模型加载中 / 出错时提示。 -->
+        <span
+          v-if="translateOn && translationLoading"
+          class="inline-flex items-center gap-1 text-[13px] text-neutral-500 tabular-nums dark:text-neutral-400"
+          :title="translationDownloading ? t('status.transDownloading') : t('status.transLoading')"
+        >
+          <LoaderCircle :size="14" class="animate-spin" />
           <span>{{ t('main.translate') }}</span>
-          <span
-            v-if="translationLoading"
-            class="inline-flex items-center gap-1 text-xs tabular-nums"
-            :title="translationDownloading ? t('status.transDownloading') : t('status.transLoading')"
-          >
-            <LoaderCircle :size="13" class="animate-spin" />
-            <span v-if="translationDownloading">{{ translationProgress }}%</span>
-          </span>
-          <TriangleAlert
-            v-else-if="translationError"
-            :size="14"
-            class="text-red-500"
-            :title="t('status.transFailed')"
-          />
-          <n-switch v-model:value="translateOn" size="small" />
-        </label>
+          <span v-if="translationDownloading">{{ translationProgress }}%</span>
+        </span>
+        <span
+          v-else-if="translateOn && translationError"
+          class="inline-flex items-center gap-1 text-[13px] text-red-500"
+          :title="t('status.transFailed')"
+        >
+          <TriangleAlert :size="14" />
+          <span>{{ t('main.translate') }}</span>
+        </span>
 
         <!-- NDropdown 无 disabled 属性：无内容时直接渲染禁用按钮，避免空状态仍能弹出菜单 -->
         <n-dropdown v-if="hasContent" trigger="click" :options="clearOptions" @select="onClearSelect">

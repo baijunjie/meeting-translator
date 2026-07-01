@@ -10,6 +10,7 @@ const api: ElectronApi = {
   openMicSettings: () => ipcRenderer.send('mic:open-settings'),
   getSettings: () => ipcRenderer.invoke('settings:get'),
   saveSettings: (settings) => ipcRenderer.invoke('settings:save', settings),
+  testCloud: (cfg) => ipcRenderer.invoke('translation:test-cloud', cfg),
   getSetupStatus: () => ipcRenderer.invoke('setup:get-status'),
   downloadAsrModels: () => ipcRenderer.invoke('setup:download-asr'),
   onSetupProgress: (cb) => ipcRenderer.on('setup:progress', (_e, p) => cb(p)),

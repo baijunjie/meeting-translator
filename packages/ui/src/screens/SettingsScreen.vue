@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { reactive } from 'vue';
+import { reactive, ref } from 'vue';
 import { NButton } from 'naive-ui';
 import { ArrowLeft } from '@lucide/vue';
 import { useI18n } from 'vue-i18n';
@@ -14,17 +14,24 @@ const form = reactive<SettingsFormData>({
   nativeLang: current.nativeLang,
   fontSize: current.fontSize,
   theme: current.theme,
-  engine: current.translation.engine,
+  // 三态：未开启翻译 → 无；开启 → 对应引擎（选了模型即视为开启，主页无独立开关）。
+  engine: current.translation.enabled ? current.translation.engine : 'none',
   cloud: { ...current.translation.cloud },
 });
 
+// 云端引擎需先「测试连接」通过才允许保存；由 SettingsForm 回传（非云端恒为 true）。
+const saveable = ref(true);
+
 async function save(): Promise<void> {
+  // 三态映射回持久化：选「无」→ enabled=false（引擎保留原值）；选模型 → enabled=true + 该引擎。
+  const enabled = form.engine !== 'none';
+  const engine = form.engine === 'none' ? current.translation.engine : form.engine;
   await saveSettings({
     ...current,
     nativeLang: form.nativeLang,
     fontSize: form.fontSize,
     theme: form.theme,
-    translation: { ...current.translation, engine: form.engine, cloud: { ...form.cloud } },
+    translation: { ...current.translation, enabled, engine, cloud: { ...form.cloud } },
   });
   emit('close');
 }
@@ -48,12 +55,12 @@ function cancel(): void {
       </n-button>
       <span class="text-[15px] font-semibold">{{ t('settings.title') }}</span>
       <div class="flex-1" />
-      <n-button type="primary" @click="save">{{ t('settings.save') }}</n-button>
+      <n-button type="primary" :disabled="!saveable" @click="save">{{ t('settings.save') }}</n-button>
     </header>
 
     <div class="flex-1 overflow-y-auto">
       <div class="mx-auto w-full max-w-[560px] px-5 py-6">
-        <settings-form :form="form" />
+        <settings-form :form="form" v-model:saveable="saveable" />
       </div>
     </div>
   </div>

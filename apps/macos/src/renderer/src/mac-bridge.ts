@@ -47,6 +47,7 @@ export function createMacBridge(api: ElectronApi): AppBridge {
     openMicSettings: () => api.openMicSettings(),
     getSettings: () => api.getSettings(),
     saveSettings: (settings) => api.saveSettings(settings),
+    testCloud: (cfg) => api.testCloud(cfg),
     getSetupStatus: () => api.getSetupStatus(),
     downloadAsrModels: () => api.downloadAsrModels(),
     saveArchive: (name, lines) => api.saveArchive(name, lines),

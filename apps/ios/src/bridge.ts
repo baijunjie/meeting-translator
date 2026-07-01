@@ -34,6 +34,7 @@ import type {
   ArchiveLine,
   ArchiveRecord,
   ArchiveSummary,
+  CloudTranslationConfig,
   StartResult,
   MicPermission,
   SetupStatus,
@@ -247,6 +248,15 @@ export function createIosBridge(): AppBridge {
     },
     saveSettings(settings: AppSettings): Promise<AppSettings> {
       return writeSettings(settings);
+    },
+    async testCloud(cfg: CloudTranslationConfig): Promise<{ ok: boolean; error?: string }> {
+      // 真打一次最小翻译请求验证端点/密钥/模型；source≠target 避免被同语言短路直接返回原文。
+      try {
+        await new CloudTranslator(cfg).translate('hello', { source: 'en', target: 'ja' });
+        return { ok: true };
+      } catch (e) {
+        return { ok: false, error: e instanceof Error ? e.message : String(e) };
+      }
     },
 
     // ===== 首次安装 / 模型下载（原生）=====

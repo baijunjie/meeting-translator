@@ -43,8 +43,8 @@ export async function loadSettings(): Promise<AppSettings> {
   applyLocale(s.nativeLang);
   applyFontSize(s.fontSize);
   applyTheme(s.theme);
-  // 不在启动时主动预热翻译模型：否则每次打开都要把缓存模型重新载入内存、弹"加载中"。
-  // 改为用到才载（开翻译开关 / 第一句要翻译时）。
+  // UI 层不在此主动预热翻译模型（放这里统一预热会让每次打开都重载缓存模型、弹"加载中"）；
+  // 预热时机交给各平台 bridge 决定：web 启动时若翻译已开+本地引擎就预热，macOS 仅开关开启时预热。
   return s;
 }
 

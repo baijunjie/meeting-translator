@@ -45,6 +45,12 @@ export type {
 export type ElectronApi = AppBridge & {
   /** 渲染层采集到的 PCM 帧经 IPC 送往主进程/ASR 子进程 */
   sendAudio(samples: Float32Array): void;
+  /**
+   * 云端配置连通性测试。macOS 在主进程用 Node fetch 打一次最小请求（无浏览器 CORS 限制，
+   * 与实际云翻译同环境）。AppBridge 上是可选，这里收紧为必实现——好让设置页的「测试连接」
+   * 与 Web/iOS 行为一致（见 packages/ui SettingsForm 的 canTestCloud）。
+   */
+  testCloud: NonNullable<AppBridge['testCloud']>;
 };
 
 /** ASR 子进程(utilityProcess) ←→ 主进程 的消息协议 */

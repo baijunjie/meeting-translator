@@ -7,25 +7,89 @@ import type {
   TranslationEngine,
 } from '@rt/core';
 
+/**
+ * 翻译方式的三态选择（UI 概念，不进持久化）：
+ *  · 'none'          → 关闭翻译（取代旧的独立翻译开关）
+ *  · 'm2m100'/'cloud' → 选中即开启翻译并用对应引擎
+ * 与持久化的 { enabled, engine } 的映射在各调用页完成（enabled = 选择 !== 'none'）。
+ */
+export type TranslationChoice = 'none' | TranslationEngine;
+
 /** 设置表单的数据形状（设置页与首次引导向导共用） */
 export interface SettingsFormData {
   nativeLang: UiLang;
   fontSize: FontSize;
   theme: ThemePref;
-  engine: TranslationEngine;
+  engine: TranslationChoice;
   cloud: CloudTranslationConfig;
 }
 </script>
 
 <script setup lang="ts">
-import { computed, watch } from 'vue';
-import { NSelect, NInput, NFormItem, NAlert } from 'naive-ui';
+import { computed, ref, watch, watchEffect } from 'vue';
+import { NSelect, NInput, NFormItem, NAlert, NButton } from 'naive-ui';
 import { useI18n } from 'vue-i18n';
+import { bridge } from '../bridge';
 import { previewLocale, previewTheme, applyFontSize } from '../composables/useSettings';
 
 const { t } = useI18n();
 // 父组件持有 reactive 表单对象，子组件直接通过 v-model 修改其字段
 const props = defineProps<{ form: SettingsFormData }>();
+
+// 平台是否支持本地翻译引擎（Web 在 iOS 上为 false：WebKit 内存装不下本地模型）。
+// 不可用时仅从「翻译方式」下拉里去掉「本地」项（仍保留 无 / 云端）。iOS 上持久化的 engine
+// 也已被 bridge 收敛为 cloud（applyPlatformConstraints），故表单不会停在无法选中的本地项。
+const localTranslationAvailable = bridge().localTranslationAvailable !== false;
+
+// —— 云端连接测试 + 保存门禁 ——
+// saveable 回传父组件（设置页/引导页据此禁用「保存/开始」）：非云端恒可存；云端需测试通过。
+const saveable = defineModel<boolean>('saveable', { default: true });
+
+// 平台是否支持云端测试：Web / iOS 用 JS fetch 实现；macOS 云翻译在独立进程、未提供本方法
+// → 不显示测试按钮、也不阻断保存（沿用旧行为）。
+const canTestCloud = typeof bridge().testCloud === 'function';
+type CloudTestState = 'idle' | 'testing' | 'ok' | 'error';
+const cloudTest = ref<CloudTestState>('idle');
+const cloudTestError = ref('');
+
+// 云端三项必填齐全才允许测试。
+const cloudFilled = computed(
+  () =>
+    props.form.cloud.baseURL.trim() !== '' &&
+    props.form.cloud.apiKey.trim() !== '' &&
+    props.form.cloud.model.trim() !== '',
+);
+const canTest = computed(() => cloudFilled.value && cloudTest.value !== 'testing');
+
+async function runCloudTest(): Promise<void> {
+  if (!canTest.value) return;
+  cloudTest.value = 'testing';
+  cloudTestError.value = '';
+  const r = await bridge().testCloud!({ ...props.form.cloud });
+  cloudTest.value = r.ok ? 'ok' : 'error';
+  if (!r.ok) cloudTestError.value = r.error ?? '';
+}
+
+// 引擎或任一云端字段变化 → 作废上次测试结果（避免测通后又改坏却仍能保存）。
+watch(
+  [
+    () => props.form.engine,
+    () => props.form.cloud.baseURL,
+    () => props.form.cloud.apiKey,
+    () => props.form.cloud.model,
+  ],
+  () => {
+    cloudTest.value = 'idle';
+    cloudTestError.value = '';
+  },
+);
+
+// 保存门禁：选云端就必须「测试连接」通过才能保存（三项须先填齐才可点测试）。
+// 非云端（无 / 本地）恒可保存；平台不支持测试（macOS）时不阻断，沿用旧行为。
+// 想只用转写的用户可在「翻译方式」里选「无」，不会被云端门禁卡住。
+watchEffect(() => {
+  saveable.value = props.form.engine !== 'cloud' || !canTestCloud || cloudTest.value === 'ok';
+});
 
 // 按语言 key 字母序排列
 const langOptions = [
@@ -45,8 +109,10 @@ const themeOptions = computed(() => [
   { label: t('main.themeDark'), value: 'dark' },
   { label: t('main.themeSystem'), value: 'system' },
 ]);
+// 三态：无 / 本地（仅本地引擎可用时）/ 云端。选中模型即开启翻译，选「无」即关闭。
 const engineOptions = computed(() => [
-  { label: t('settings.engineM2m100'), value: 'm2m100' },
+  { label: t('settings.engineNone'), value: 'none' },
+  ...(localTranslationAvailable ? [{ label: t('settings.engineM2m100'), value: 'm2m100' }] : []),
   { label: t('settings.engineCloud'), value: 'cloud' },
 ]);
 
@@ -86,6 +152,36 @@ watch(() => props.form.fontSize, (v) => applyFontSize(v));
         <n-input v-model:value="form.cloud.model" placeholder="gpt-4o-mini" />
       </n-form-item>
       <p class="mt-1 text-xs text-neutral-500 dark:text-neutral-400">{{ t('settings.cloudHint') }}</p>
+
+      <!-- 平台支持时才有测试：必填齐全才可点击；测试通过后父组件才允许保存 -->
+      <template v-if="canTestCloud">
+        <div class="mt-3 flex items-center gap-3">
+          <n-button
+            size="small"
+            :disabled="!canTest"
+            :loading="cloudTest === 'testing'"
+            @click="runCloudTest"
+          >
+            {{ cloudTest === 'testing' ? t('settings.testing') : t('settings.testConn') }}
+          </n-button>
+          <span
+            v-if="cloudTest === 'ok'"
+            class="text-xs font-medium text-green-600 dark:text-green-400"
+          >✓ {{ t('settings.testOk') }}</span>
+          <span
+            v-else-if="cloudTest === 'error'"
+            class="text-xs font-medium text-red-600 dark:text-red-400"
+          >{{ t('settings.testFail') }}</span>
+          <span
+            v-else-if="cloudTest === 'idle' && cloudFilled"
+            class="text-xs text-neutral-500 dark:text-neutral-400"
+          >{{ t('settings.testHint') }}</span>
+        </div>
+        <p
+          v-if="cloudTest === 'error' && cloudTestError"
+          class="mt-1 break-words text-xs text-red-500 dark:text-red-400"
+        >{{ cloudTestError }}</p>
+      </template>
     </template>
   </div>
 </template>

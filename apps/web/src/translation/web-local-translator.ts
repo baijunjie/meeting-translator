@@ -20,7 +20,7 @@ export class WebLocalTranslator {
   private nextId = 1;
   private pending = new Map<number, { resolve: (t: string) => void; reject: (e: Error) => void }>();
   private progressCb: ((p: ModelProgress) => void) | null = null;
-  // 预热（打开翻译开关时）：init→ready 的等待句柄，幂等复用。
+  // 预热（翻译开启时：开关打开 / 启动时已开）：init→ready 的等待句柄，幂等复用。
   private warming: Promise<void> | null = null;
   private warmResolve: (() => void) | null = null;
   private warmReject: ((e: Error) => void) | null = null;
@@ -77,7 +77,7 @@ export class WebLocalTranslator {
     return w;
   }
 
-  /** 预热：加载/下载模型但不翻译（打开翻译开关时调用，第一句不再等下载）。幂等。 */
+  /** 预热：加载/下载模型但不翻译（翻译开启时调用——开关打开或启动时已开，第一句不再等下载）。幂等。 */
   warmUp(onProgress?: (p: ModelProgress) => void): Promise<void> {
     if (this.warming) return this.warming;
     if (onProgress) this.progressCb = onProgress;
