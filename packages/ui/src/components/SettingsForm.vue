@@ -27,7 +27,7 @@ export interface SettingsFormData {
 
 <script setup lang="ts">
 import { computed, ref, watch, watchEffect } from 'vue';
-import { NSelect, NInput, NFormItem, NAlert, NButton } from 'naive-ui';
+import { NSelect, NInput, NAutoComplete, NFormItem, NAlert, NButton } from 'naive-ui';
 import { useI18n } from 'vue-i18n';
 import { bridge } from '../bridge';
 import { previewLocale, previewTheme, applyFontSize } from '../composables/useSettings';
@@ -140,6 +140,83 @@ const engineOptions = computed(() => [
   { label: t('settings.engineCloud'), value: 'cloud' },
 ]);
 
+// —— 云端服务商预设（Base URL / 模型可选可自定义）——
+// name 为服务商品牌名（不本地化）；baseURL 不带结尾斜杠（CloudTranslator 会再拼 /chat/completions）；
+// models 优先列快速、便宜、适合翻译的主力型号。用户仍可在输入框手输任意值。
+interface ProviderPreset {
+  name: string;
+  baseURL: string;
+  models: string[];
+}
+const providerPresets: ProviderPreset[] = [
+  {
+    name: 'OpenAI',
+    baseURL: 'https://api.openai.com/v1',
+    models: ['gpt-4o-mini', 'gpt-4.1-mini', 'gpt-4.1-nano', 'gpt-5-mini'],
+  },
+  {
+    // Anthropic 的 OpenAI 兼容端点（官方定位为测试/对比用，非生产长期方案）；原生接口为 /v1/messages，本 app 不走。
+    name: 'Claude',
+    baseURL: 'https://api.anthropic.com/v1',
+    models: ['claude-haiku-4-5', 'claude-sonnet-4-6'],
+  },
+  {
+    name: 'DeepSeek',
+    baseURL: 'https://api.deepseek.com/v1',
+    models: ['deepseek-v4-flash', 'deepseek-chat'],
+  },
+  {
+    name: 'Gemini',
+    baseURL: 'https://generativelanguage.googleapis.com/v1beta/openai',
+    models: ['gemini-2.5-flash-lite', 'gemini-2.5-flash', 'gemini-2.0-flash'],
+  },
+  {
+    name: '通义千问 Qwen',
+    baseURL: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+    models: ['qwen-mt-flash', 'qwen-mt-turbo', 'qwen-flash', 'qwen-plus'],
+  },
+  {
+    name: '智谱 GLM',
+    baseURL: 'https://open.bigmodel.cn/api/paas/v4',
+    models: ['glm-4.7-flash', 'glm-4-flash', 'glm-4.6'],
+  },
+  {
+    name: 'MiniMax',
+    baseURL: 'https://api.minimax.io/v1',
+    models: ['MiniMax-M2.7-highspeed', 'MiniMax-M2.5-highspeed', 'MiniMax-M2.5'],
+  },
+  {
+    name: '硅基流动 SiliconFlow',
+    baseURL: 'https://api.siliconflow.cn/v1',
+    models: ['Qwen/Qwen2.5-7B-Instruct', 'deepseek-ai/DeepSeek-V3', 'THUDM/glm-4-9b-chat'],
+  },
+];
+
+const normalizeUrl = (u: string): string => u.trim().replace(/\/+$/, '').toLowerCase();
+
+// Base URL 候选：按输入过滤（匹配服务商名或 URL），无匹配则回退全部。value=URL、label 带服务商名。
+const baseUrlOptions = computed(() => {
+  const q = props.form.cloud.baseURL.trim().toLowerCase();
+  const matched = providerPresets.filter(
+    (p) => !q || p.name.toLowerCase().includes(q) || p.baseURL.toLowerCase().includes(q),
+  );
+  const list = matched.length ? matched : providerPresets;
+  return list.map((p) => ({ label: `${p.name} · ${p.baseURL}`, value: p.baseURL }));
+});
+
+// 模型候选：随当前 Base URL 联动到对应服务商的模型；未匹配到服务商则用全部预设模型去重兜底。
+const modelOptions = computed(() => {
+  const base = normalizeUrl(props.form.cloud.baseURL);
+  const provider = providerPresets.find((p) => normalizeUrl(p.baseURL) === base);
+  const models = provider
+    ? provider.models
+    : [...new Set(providerPresets.flatMap((p) => p.models))];
+  const q = props.form.cloud.model.trim().toLowerCase();
+  const matched = q ? models.filter((m) => m.toLowerCase().includes(q)) : models;
+  const list = matched.length ? matched : models;
+  return list.map((m) => ({ label: m, value: m }));
+});
+
 // 改动即时预览界面语言 / 主题 / 字体
 watch(() => props.form.nativeLang, (v) => previewLocale(v));
 watch(() => props.form.theme, (v) => previewTheme(v));
@@ -167,10 +244,22 @@ watch(() => props.form.fontSize, (v) => applyFontSize(v));
     <template v-if="form.engine === 'cloud'">
       <n-alert type="warning" :show-icon="true" class="mb-3.5">{{ t('settings.cloudWarn') }}</n-alert>
       <n-form-item :label="t('settings.baseUrl')">
-        <n-input v-model:value="form.cloud.baseURL" placeholder="https://api.openai.com/v1" />
+        <n-auto-complete
+          v-model:value="form.cloud.baseURL"
+          :options="baseUrlOptions"
+          :get-show="() => true"
+          clearable
+          placeholder="https://api.openai.com/v1"
+        />
       </n-form-item>
       <n-form-item :label="t('settings.model')">
-        <n-input v-model:value="form.cloud.model" placeholder="gpt-4o-mini" />
+        <n-auto-complete
+          v-model:value="form.cloud.model"
+          :options="modelOptions"
+          :get-show="() => true"
+          clearable
+          placeholder="gpt-4o-mini"
+        />
       </n-form-item>
       <n-form-item :label="t('settings.apiKey')">
         <n-input v-model:value="form.cloud.apiKey" type="password" show-password-on="click" placeholder="sk-..." />
