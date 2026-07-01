@@ -20,6 +20,10 @@ export class WebLocalTranslator {
   private nextId = 1;
   private pending = new Map<number, { resolve: (t: string) => void; reject: (e: Error) => void }>();
   private progressCb: ((p: ModelProgress) => void) | null = null;
+  // 预热（打开翻译开关时）：init→ready 的等待句柄，幂等复用。
+  private warming: Promise<void> | null = null;
+  private warmResolve: (() => void) | null = null;
+  private warmReject: ((e: Error) => void) | null = null;
 
   constructor(private readonly spec: LocalModelSpec = M2M100_SPEC) {}
 
@@ -37,6 +41,12 @@ export class WebLocalTranslator {
         case 'progress':
           this.progressCb?.(m.progress as ModelProgress);
           break;
+        case 'ready':
+          // 预热完成（响应 init）。
+          this.warmResolve?.();
+          this.warmResolve = null;
+          this.warmReject = null;
+          break;
         case 'result': {
           const p = this.pending.get(m.id);
           if (p) {
@@ -46,6 +56,14 @@ export class WebLocalTranslator {
           break;
         }
         case 'error': {
+          if (m.id === -1) {
+            // 初始化/加载失败：结束预热等待，允许下次重试。
+            this.warmReject?.(new Error(m.error));
+            this.warmResolve = null;
+            this.warmReject = null;
+            this.warming = null;
+            break;
+          }
           const p = this.pending.get(m.id);
           if (p) {
             this.pending.delete(m.id);
@@ -53,11 +71,27 @@ export class WebLocalTranslator {
           }
           break;
         }
-        // 'ready' 暂不需要：translate 由 worker 内部懒加载，首条会等模型就绪。
       }
     };
     this.worker = w;
     return w;
+  }
+
+  /** 预热：加载/下载模型但不翻译（打开翻译开关时调用，第一句不再等下载）。幂等。 */
+  warmUp(onProgress?: (p: ModelProgress) => void): Promise<void> {
+    if (this.warming) return this.warming;
+    if (onProgress) this.progressCb = onProgress;
+    const w = this.ensureWorker();
+    this.warming = new Promise<void>((resolve, reject) => {
+      this.warmResolve = resolve;
+      this.warmReject = reject;
+    });
+    w.postMessage({
+      type: 'init',
+      modelId: this.spec.modelId,
+      dtype: this.spec.dtype,
+    } satisfies ToTranslateWorker);
+    return this.warming;
   }
 
   /**

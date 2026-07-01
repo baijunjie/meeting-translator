@@ -210,6 +210,24 @@ export function createWebBridge(): AppBridge {
     setTranslateEnabled(enabled: boolean): void {
       translateEnabled = enabled;
       if (cachedSettings) cachedSettings.translation.enabled = enabled;
+      // 打开开关即预热本地模型（云端无需下载）：进度经 onTranslationStatus 上报，第一句不再等下载。
+      if (enabled && cachedSettings && cachedSettings.translation.engine !== 'cloud') {
+        translationStatusCb?.({ state: 'loading' });
+        getLocalTranslator()
+          .warmUp((p) => {
+            if (p.status === 'progress' && typeof p.progress === 'number') {
+              translationStatusCb?.({ state: 'loading', progress: p.progress / 100 });
+            }
+          })
+          .then(() => translationStatusCb?.({ state: 'ready' }))
+          .catch((e) => {
+            console.error('[translate:warmup]', e);
+            translationStatusCb?.({
+              state: 'error',
+              error: e instanceof Error ? e.message : String(e),
+            });
+          });
+      }
     },
 
     // ===== 麦克风权限（Permissions API） =====
