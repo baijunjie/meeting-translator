@@ -65,7 +65,7 @@ export function createIosBridge(): AppBridge {
   // —— 缓存设置：segment 到达时同步读取翻译开关/引擎/母语，避免每段都 await KV ——
   let cachedSettings: AppSettings | null = null;
 
-  // —— 翻译开关（轻量，独立于 settings.translation.enabled 持久化，与 macOS 一致语义） ——
+  // —— 翻译开关：内存态即时生效，同时落盘到 settings.translation.enabled（重启后保持，与 macOS 一致） ——
   let translateEnabled = false;
 
   // ---- 持久化：设置 ----
@@ -207,6 +207,18 @@ export function createIosBridge(): AppBridge {
     setTranslateEnabled(enabled: boolean): void {
       translateEnabled = enabled;
       if (cachedSettings) cachedSettings.translation.enabled = enabled;
+      // 落盘到 Preferences，重启后保持（与 macOS 一致：改开关即持久化）。
+      // 只改 enabled 一个字段；缓存未就绪时先读一次再写，避免丢掉其它字段。
+      void (async () => {
+        try {
+          const s = cachedSettings ?? (await readSettings());
+          s.translation.enabled = enabled;
+          cachedSettings = s;
+          await Preferences.set({ key: SETTINGS_KEY, value: JSON.stringify(s) });
+        } catch {
+          /* 落盘失败不影响内存态生效 */
+        }
+      })();
     },
 
     // ===== 麦克风权限（原生）=====

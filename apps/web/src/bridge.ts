@@ -68,7 +68,7 @@ export function createWebBridge(): AppBridge {
   // —— 缓存设置：segment 到达时同步读取翻译开关/引擎/母语，避免每段都 await IndexedDB ——
   let cachedSettings: AppSettings | null = null;
 
-  // —— 翻译开关（轻量，独立于 settings.translation.enabled 持久化，与 macOS/iOS 一致语义） ——
+  // —— 翻译开关：内存态即时生效，同时落盘到 settings.translation.enabled（刷新后保持，与 macOS 一致） ——
   let translateEnabled = false;
 
   // —— 本地翻译器（懒建，缓存模型实例，首次翻译触发下载） ——
@@ -210,6 +210,18 @@ export function createWebBridge(): AppBridge {
     setTranslateEnabled(enabled: boolean): void {
       translateEnabled = enabled;
       if (cachedSettings) cachedSettings.translation.enabled = enabled;
+      // 落盘到 IndexedDB，刷新后保持（与 macOS 一致：改开关即持久化）。
+      // 只改 enabled 一个字段，不重建翻译器；缓存未就绪时先读一次再写，避免丢掉其它字段。
+      void (async () => {
+        try {
+          const s = cachedSettings ?? (await readSettings());
+          s.translation.enabled = enabled;
+          cachedSettings = s;
+          await (await db()).put(KV_STORE, s, SETTINGS_KEY);
+        } catch (e) {
+          console.error('[settings:persist-translate]', e);
+        }
+      })();
       // 打开开关即预热本地模型（云端无需下载）：进度经 onTranslationStatus 上报，第一句不再等下载。
       if (enabled && cachedSettings && cachedSettings.translation.engine !== 'cloud') {
         translationStatusCb?.({ state: 'loading' });
