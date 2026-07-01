@@ -31,10 +31,11 @@ export function makeDefaults(systemLangs: string[]): AppSettings {
     translation: {
       enabled: false,
       engine: 'm2m100',
+      // 云端三项默认留空：主页设置里由预设选择或手动输入填入（占位符仅作示例提示）
       cloud: {
-        baseURL: 'https://api.openai.com/v1',
+        baseURL: '',
         apiKey: '',
-        model: 'gpt-4o-mini',
+        model: '',
       },
     },
   };
