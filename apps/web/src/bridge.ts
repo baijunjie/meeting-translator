@@ -65,11 +65,9 @@ export function createWebBridge(): AppBridge {
   let translationStatusCb: ((s: TranslationStatusPayload) => void) | null = null;
   let setupProgressCb: ((p: SetupProgress) => void) | null = null;
 
-  // —— 缓存设置：segment 到达时同步读取翻译开关/引擎/母语，避免每段都 await IndexedDB ——
+  // —— 缓存设置：翻译热路径（segment 到达）同步读开关/引擎/母语，免得每段都 await IndexedDB。
+  //    翻译开关就是 cachedSettings.translation.enabled，改后即时生效并落盘，不再另存一份布尔。 ——
   let cachedSettings: AppSettings | null = null;
-
-  // —— 翻译开关：内存态即时生效，同时落盘到 settings.translation.enabled（刷新后保持，与 macOS 一致） ——
-  let translateEnabled = false;
 
   // —— 本地翻译器（懒建，缓存模型实例，首次翻译触发下载） ——
   let localTranslator: WebLocalTranslator | null = null;
@@ -105,10 +103,27 @@ export function createWebBridge(): AppBridge {
     } catch {
       raw = null;
     }
-    const settings = withDefaults(raw, defaults);
-    cachedSettings = settings;
-    translateEnabled = settings.translation.enabled;
-    return settings;
+    cachedSettings = withDefaults(raw, defaults);
+    return cachedSettings;
+  }
+
+  // 写设置：补齐/校验后落盘并刷新缓存。所有写入路径（保存设置、切翻译开关）都走这里。
+  async function writeSettings(next: AppSettings): Promise<AppSettings> {
+    cachedSettings = withDefaults(next, makeDefaults([]));
+    await (await db()).put(KV_STORE, cachedSettings, SETTINGS_KEY);
+    return cachedSettings;
+  }
+
+  // 首次读取去重：启动预读与 UI 首次 getSettings() 并发触发，共享同一次 IndexedDB 读；
+  // 读完即释放，之后再调用会重新读盘（保存后仍能拿到最新值）。
+  let readInFlight: Promise<AppSettings> | null = null;
+  function readSettingsOnce(): Promise<AppSettings> {
+    if (!readInFlight) {
+      readInFlight = readSettings().finally(() => {
+        readInFlight = null;
+      });
+    }
+    return readInFlight;
   }
 
   // ---- 持久化：归档 ----
@@ -121,10 +136,29 @@ export function createWebBridge(): AppBridge {
     }
   }
 
+  // 「翻译中 → 就绪/失败」统一外壳：loading 状态、结果/错误上报、结束等待动画都在这里，
+  // 具体产出交给 produce（返回已做好脚本归一化的最终译文）。云 / 本地共用，避免两份重复。
+  async function runTranslation(
+    id: number,
+    label: string,
+    produce: () => Promise<string>,
+  ): Promise<void> {
+    translationStatusCb?.({ state: 'loading' });
+    try {
+      const text = await produce();
+      translationStatusCb?.({ state: 'ready' });
+      translationCb?.({ id, text });
+    } catch (e) {
+      console.error(label, e);
+      translationStatusCb?.({ state: 'error', error: e instanceof Error ? e.message : String(e) });
+      translationCb?.({ id, text: '' }); // 结束等待动画
+    }
+  }
+
   // ---- 翻译：segment 到达时按当前设置翻成母语（云 / 本地两条路径） ----
   async function translateSegment(seg: SegmentPayload): Promise<void> {
-    if (!translateEnabled) return;
-    const s = cachedSettings ?? (await readSettings());
+    const s = cachedSettings ?? (await readSettingsOnce());
+    if (!s.translation.enabled) return;
 
     const target = targetCode(M2M100_SPEC, s.nativeLang);
     if (seg.lang === target) return; // 同语言不译：不发 pending，UI 不显示等待动画
@@ -134,48 +168,27 @@ export function createWebBridge(): AppBridge {
     // 标记该行进入「翻译中」：UI 在译文区显示等待动画，直到下方发出最终结果。
     translationCb?.({ id: seg.id, text: '', pending: true });
 
-    // —— 云翻译 ——
+    // —— 云翻译：已直接产出目标语，母语需要脚本归一化时再兜一层。 ——
     if (s.translation.engine === 'cloud') {
-      translationStatusCb?.({ state: 'loading' });
-      try {
-        const translator = new CloudTranslator(s.translation.cloud);
-        const text = await translator.translate(seg.text, { source: seg.lang, target });
-        translationStatusCb?.({ state: 'ready' });
-        // 云翻译已直接产出目标语，这里仅在母语需要脚本归一化时再兜一层。
-        translationCb?.({ id: seg.id, text: toScript ? toScript(text) : text });
-      } catch (e) {
-        console.error('[translate:cloud]', e);
-        translationStatusCb?.({
-          state: 'error',
-          error: e instanceof Error ? e.message : String(e),
+      await runTranslation(seg.id, '[translate:cloud]', async () => {
+        const text = await new CloudTranslator(s.translation.cloud).translate(seg.text, {
+          source: seg.lang,
+          target,
         });
-        translationCb?.({ id: seg.id, text: '' }); // 结束等待动画
-      }
+        return toScript ? toScript(text) : text;
+      });
       return;
     }
 
-    // —— 本地翻译：Transformers.js（M2M100，浏览器内）。首次会下载模型 ——
-    translationStatusCb?.({ state: 'loading' });
-    try {
-      const translator = getLocalTranslator();
-      // 把模型下载进度透传到 onTranslationStatus（单文件百分比，0~1）。
-      const onProgress = (p: ModelProgress) => {
+    // —— 本地翻译：Transformers.js（M2M100，浏览器内）。首次会下载模型，进度透传到 onTranslationStatus。
+    //    translate 内部已做 toScript，这里直接返回。 ——
+    await runTranslation(seg.id, '[translate:local]', () =>
+      getLocalTranslator().translate(seg.text, { source: seg.lang, target }, (p: ModelProgress) => {
         if (p.status === 'progress' && typeof p.progress === 'number') {
           translationStatusCb?.({ state: 'loading', progress: p.progress / 100 });
         }
-      };
-      // translate 内部已做 toScript；这里目标短码即 M2M100_SPEC.langs[nativeLang].code 映射的来源。
-      const text = await translator.translate(seg.text, { source: seg.lang, target }, onProgress);
-      translationStatusCb?.({ state: 'ready' });
-      translationCb?.({ id: seg.id, text });
-    } catch (e) {
-      console.error('[translate:local]', e);
-      translationStatusCb?.({
-        state: 'error',
-        error: e instanceof Error ? e.message : String(e),
-      });
-      translationCb?.({ id: seg.id, text: '' }); // 结束等待动画
-    }
+      }),
+    );
   }
 
   // ---- Web ASR（Phase 2：sherpa-onnx WASM 真识别）。回调转发给 UI；segment 还会触发翻译 ----
@@ -206,24 +219,14 @@ export function createWebBridge(): AppBridge {
       return asr.stop();
     },
 
-    // ===== 翻译开关 =====
+    // ===== 翻译开关（只改 enabled 并落盘，不重建翻译器） =====
     setTranslateEnabled(enabled: boolean): void {
-      translateEnabled = enabled;
-      if (cachedSettings) cachedSettings.translation.enabled = enabled;
-      // 落盘到 IndexedDB，刷新后保持（与 macOS 一致：改开关即持久化）。
-      // 只改 enabled 一个字段，不重建翻译器；缓存未就绪时先读一次再写，避免丢掉其它字段。
-      void (async () => {
-        try {
-          const s = cachedSettings ?? (await readSettings());
-          s.translation.enabled = enabled;
-          cachedSettings = s;
-          await (await db()).put(KV_STORE, s, SETTINGS_KEY);
-        } catch (e) {
-          console.error('[settings:persist-translate]', e);
-        }
-      })();
+      // 开关在 UI 渲染前必已 loadSettings 填好缓存；未就绪时忽略（正常不会发生）。
+      if (!cachedSettings) return;
+      cachedSettings.translation.enabled = enabled; // 内存即时生效，翻译热路径当拍可见
+      void writeSettings(cachedSettings).catch((e) => console.error('[settings:save]', e));
       // 打开开关即预热本地模型（云端无需下载）：进度经 onTranslationStatus 上报，第一句不再等下载。
-      if (enabled && cachedSettings && cachedSettings.translation.engine !== 'cloud') {
+      if (enabled && cachedSettings.translation.engine !== 'cloud') {
         translationStatusCb?.({ state: 'loading' });
         getLocalTranslator()
           .warmUp((p) => {
@@ -261,15 +264,10 @@ export function createWebBridge(): AppBridge {
 
     // ===== 设置（IndexedDB） =====
     getSettings(): Promise<AppSettings> {
-      return readSettings();
+      return readSettingsOnce();
     },
-    async saveSettings(settings: AppSettings): Promise<AppSettings> {
-      // 复用 withDefaults 做一次补齐/校验，确保落盘的是规范结构。
-      const normalized = withDefaults(settings, makeDefaults([]));
-      await (await db()).put(KV_STORE, normalized, SETTINGS_KEY);
-      cachedSettings = normalized;
-      translateEnabled = normalized.translation.enabled;
-      return normalized;
+    saveSettings(settings: AppSettings): Promise<AppSettings> {
+      return writeSettings(settings);
     },
 
     // ===== 首次安装 / 模型下载（Phase 2） =====
@@ -338,8 +336,8 @@ export function createWebBridge(): AppBridge {
     },
   };
 
-  // 预读一次设置，填充缓存（异步，不阻塞返回）。
-  void readSettings();
+  // 预读一次设置，填充缓存（异步，不阻塞返回）。与 UI 首次 getSettings() 共享同一次读。
+  void readSettingsOnce();
 
   return api;
 }
