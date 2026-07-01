@@ -34,7 +34,7 @@ onMounted(async () => {
   <n-config-provider :theme="naiveTheme">
     <!-- safe-area 内边距：iOS 刘海/灵动岛/Home 指示条留白；env() 在桌面端恒为 0，故 macOS 不受影响 -->
     <div
-      class="h-screen overflow-hidden bg-white text-neutral-900 dark:bg-[#1e1f24] dark:text-neutral-100"
+      class="h-full overflow-hidden bg-white text-neutral-900 dark:bg-[#1e1f24] dark:text-neutral-100"
       style="padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)"
     >
       <onboarding v-if="screen === 'onboarding'" @done="afterOnboarded" />
