@@ -13,6 +13,7 @@ const messages = {
       title: 'Archives',
     },
     main: {
+      appTitle: 'Realtime Translator',
       archive: 'Archive',
       clear: 'Clear',
       emptyHint: 'Click “Start Recording” and results will appear here',
@@ -99,6 +100,7 @@ const messages = {
       title: 'アーカイブ',
     },
     main: {
+      appTitle: 'リアルタイム翻訳',
       archive: 'アーカイブ',
       clear: 'クリア',
       emptyHint: '「録音開始」をクリックすると、認識結果がここに表示されます',
@@ -185,6 +187,7 @@ const messages = {
       title: '보관 기록',
     },
     main: {
+      appTitle: '실시간 번역',
       archive: '보관',
       clear: '지우기',
       emptyHint: '「녹음 시작」을 누르면 인식 결과가 여기에 표시됩니다',
@@ -269,6 +272,7 @@ const messages = {
       title: '归档记录',
     },
     main: {
+      appTitle: '实时翻译',
       archive: '归档',
       clear: '清屏',
       emptyHint: '点击「开始录音」，识别结果会显示在这里',
@@ -353,6 +357,7 @@ const messages = {
       title: '封存記錄',
     },
     main: {
+      appTitle: '即時翻譯',
       archive: '封存',
       clear: '清除',
       emptyHint: '點擊「開始錄音」，辨識結果會顯示在這裡',
