@@ -26,6 +26,7 @@ import {
   makeArchiveId,
   CloudTranslator,
   M2M100_SPEC,
+  planTranslation,
 } from '@rt/core';
 import type {
   AppBridge,
@@ -47,11 +48,6 @@ import { RealtimeAsr, RealtimeTranslate } from '../native-plugin';
 
 const SETTINGS_KEY = 'mt.settings';
 const ARCHIVES_KEY = 'mt.archives';
-
-/** 母语 app 语言码 → SenseVoice/翻译用的短码（zh-Hant 走 zh，靠脚本后处理）。 */
-function targetCode(spec: typeof M2M100_SPEC, nativeLang: string): string {
-  return spec.langs[nativeLang]?.code ?? spec.fallbackLang;
-}
 
 export function createIosBridge(): AppBridge {
   // —— UI 注册的回调（mountApp → registerTranscriptionListeners 时注入） ——
@@ -141,10 +137,14 @@ export function createIosBridge(): AppBridge {
     const s = cachedSettings ?? (await readSettingsOnce());
     if (!s.translation.enabled) return;
 
-    const target = targetCode(M2M100_SPEC, s.nativeLang);
-    if (seg.lang === target) return; // 同语言不译：不发 pending，UI 不显示等待动画
-    // 目标脚本后处理（zh-Hant 繁體化等）：模型/系统只产出一个 'zh'，繁體靠脚本转换兜底。
-    const toScript = M2M100_SPEC.langs[s.nativeLang]?.toScript;
+    // 同语言是否翻、如何翻的判定统一在 @rt/core.planTranslation，三端一致。
+    const plan = planTranslation(M2M100_SPEC, seg.lang, s.nativeLang, seg.text);
+    if (plan.kind === 'skip') return; // 同语言且字形一致：不发 pending，UI 不显示等待动画
+    if (plan.kind === 'script') {
+      // 仅简繁字形不同：直接产出转换后的原文，不经模型/云，也不显示等待动画。
+      translationCb?.({ id: seg.id, text: plan.text });
+      return;
+    }
 
     // 标记该行进入「翻译中」：UI 在译文区显示等待动画，直到下方发出最终结果。
     translationCb?.({ id: seg.id, text: '', pending: true });
@@ -153,13 +153,17 @@ export function createIosBridge(): AppBridge {
     //    不可用/空结果按失败处理（抛出，走统一错误分支，提示改用云翻译）。 ——
     if (s.translation.engine !== 'cloud') {
       await runTranslation(seg.id, '[translate:device]', async () => {
-        const r = await RealtimeTranslate.translate({ text: seg.text, source: seg.lang, target });
+        const r = await RealtimeTranslate.translate({
+          text: seg.text,
+          source: seg.lang,
+          target: plan.targetCode,
+        });
         if (r.unavailable || !r.text) {
           throw new Error(
             `On-device translation unavailable (${r.reason ?? 'unknown'}); switch to cloud translation in settings.`,
           );
         }
-        return toScript ? toScript(r.text) : r.text;
+        return plan.toScript ? plan.toScript(r.text) : r.text;
       });
       return;
     }
@@ -168,9 +172,9 @@ export function createIosBridge(): AppBridge {
     await runTranslation(seg.id, '[translate:cloud]', async () => {
       const text = await new CloudTranslator(s.translation.cloud).translate(seg.text, {
         source: seg.lang,
-        target,
+        target: plan.targetCode,
       });
-      return toScript ? toScript(text) : text;
+      return plan.toScript ? plan.toScript(text) : text;
     });
   }
 

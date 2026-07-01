@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { app, BrowserWindow, ipcMain, shell, systemPreferences, utilityProcess, type UtilityProcess } from 'electron';
-import { M2M100_SPEC } from '@rt/core';
+import { M2M100_SPEC, planTranslation } from '@rt/core';
 import { loadSettings, saveSettings } from './settings';
 import { asrModelsReady, downloadAsrModels } from './model-downloader';
 import { listArchives, getArchive, saveArchive, deleteArchive } from './archives';
@@ -108,12 +108,15 @@ function translateSegment(segment: SegmentPayload): void {
   if (!settings.translation.enabled) {
     return;
   }
-  // 同语言不译：源/母语映射到同一模型码且无需脚本转换（如 zh→zh-Hant 仍需繁體化则照常翻译）。
-  // 与 web/iOS 语义一致，避免把原文原样回显成「译文」，也不会触发等待动画。
-  const targetEntry = M2M100_SPEC.langs[settings.nativeLang];
-  const targetCode = targetEntry?.code ?? M2M100_SPEC.fallbackLang;
-  const sourceCode = M2M100_SPEC.langs[segment.lang]?.code ?? segment.lang;
-  if (sourceCode === targetCode && !targetEntry?.toScript) {
+  // 同语言是否翻、如何翻的判定统一在 @rt/core.planTranslation，与 web/iOS 一致，
+  // 避免把原文原样回显成「译文」，也不会误触发等待动画。
+  const plan = planTranslation(M2M100_SPEC, segment.lang, settings.nativeLang, segment.text);
+  if (plan.kind === 'skip') {
+    return;
+  }
+  if (plan.kind === 'script') {
+    // 仅简繁字形不同：直接产出转换后的原文，无需翻译子进程，也不显示等待动画。
+    sendToRenderer('pipeline:translation', { id: segment.id, text: plan.text });
     return;
   }
   // 标记该行进入「翻译中」：渲染层在译文区显示等待动画，直到下方 result 发出最终译文。
@@ -123,7 +126,7 @@ function translateSegment(segment: SegmentPayload): void {
     id: segment.id,
     text: segment.text,
     source: segment.lang,
-    target: settings.nativeLang,
+    target: plan.targetLang,
   });
 }
 
