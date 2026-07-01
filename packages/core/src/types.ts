@@ -17,7 +17,14 @@ export interface SegmentPayload {
 /** 某条转写段的译文，按 id 对应回原文行 */
 export interface TranslationPayload {
   id: number;
+  /** 译文文本；pending 阶段为占位空串 */
   text: string;
+  /**
+   * true=翻译已派发、结果尚未到达（UI 在译文区显示等待动画）；
+   * 缺省/false=最终结果（text 即译文，空串表示无需翻译，仅用于结束等待、不展示）。
+   * 同语言等「无需翻译」的场景不发本事件，故不会出现等待动画。
+   */
+  pending?: boolean;
 }
 
 /** 说话过程中实时更新的部分识别结果，text 为空表示清除 */

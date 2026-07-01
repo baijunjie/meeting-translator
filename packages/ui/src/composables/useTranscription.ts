@@ -1,4 +1,4 @@
-import { reactive, ref } from 'vue';
+import { nextTick, reactive, ref } from 'vue';
 import { fmtClock } from '../utils/datetime';
 import { bridge } from '../bridge';
 
@@ -7,6 +7,8 @@ export interface TranscriptLine {
   time: string;
   text: string;
   translation: string;
+  /** 译文进行中：已派发翻译、结果未到，UI 在译文区显示等待动画。同语言/未开启翻译时恒 false */
+  translating: boolean;
 }
 
 export const lines = reactive<TranscriptLine[]>([]);
@@ -41,15 +43,36 @@ export function registerTranscriptionListeners(): void {
   registered = true;
 
   bridge().onSegment((seg) => {
-    lines.push({ id: seg.id, time: fmtTime(seg.start), text: seg.text, translation: '' });
-    partial.value = '';
+    lines.push({
+      id: seg.id,
+      time: fmtTime(seg.start),
+      text: seg.text,
+      translation: '',
+      translating: false,
+    });
+    // 识别区里有实时识别文字时才做交接：把它定格成这条定稿文本、下一 tick 再清空，
+    // 使向下淡出的正是落入确定句区的同一句（而非早期实时猜测）。识别区本就为空（无中间结果）则不动，停留「聆听中」。
+    if (partial.value !== '') {
+      partial.value = seg.text;
+      void nextTick(() => {
+        if (partial.value === seg.text) partial.value = '';
+      });
+    }
   });
   bridge().onPartial((p) => {
     partial.value = p.text;
   });
   bridge().onTranslation((tr) => {
     const line = lines.find((l) => l.id === tr.id);
-    if (line) line.translation = tr.text;
+    if (!line) return;
+    if (tr.pending) {
+      // 翻译已开始、结果未到：显示等待动画
+      line.translating = true;
+    } else {
+      // 最终结果（空串表示无需翻译，仅结束等待、不展示）
+      line.translation = tr.text;
+      line.translating = false;
+    }
   });
   bridge().onStatus((s) => {
     if (s.state === 'loading') {
@@ -78,6 +101,8 @@ export function registerTranscriptionListeners(): void {
       translationLoading.value = false;
       translationDownloading.value = false;
       translationError.value = true;
+      // 翻译失败（含子进程崩溃）：结束所有仍在等待的译文动画，避免永久转圈
+      for (const l of lines) l.translating = false;
     } else if (s.state === 'ready') {
       translationLoading.value = false;
       translationDownloading.value = false;

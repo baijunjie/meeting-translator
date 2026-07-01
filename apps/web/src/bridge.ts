@@ -127,9 +127,12 @@ export function createWebBridge(): AppBridge {
     const s = cachedSettings ?? (await readSettings());
 
     const target = targetCode(M2M100_SPEC, s.nativeLang);
-    if (seg.lang === target) return; // 同语言不译
+    if (seg.lang === target) return; // 同语言不译：不发 pending，UI 不显示等待动画
     // 目标脚本后处理（zh-Hant 繁體化等）：模型/系统只产出一个 'zh'，繁體靠脚本转换兜底。
     const toScript = M2M100_SPEC.langs[s.nativeLang]?.toScript;
+
+    // 标记该行进入「翻译中」：UI 在译文区显示等待动画，直到下方发出最终结果。
+    translationCb?.({ id: seg.id, text: '', pending: true });
 
     // —— 云翻译 ——
     if (s.translation.engine === 'cloud') {
@@ -146,6 +149,7 @@ export function createWebBridge(): AppBridge {
           state: 'error',
           error: e instanceof Error ? e.message : String(e),
         });
+        translationCb?.({ id: seg.id, text: '' }); // 结束等待动画
       }
       return;
     }
@@ -170,6 +174,7 @@ export function createWebBridge(): AppBridge {
         state: 'error',
         error: e instanceof Error ? e.message : String(e),
       });
+      translationCb?.({ id: seg.id, text: '' }); // 结束等待动画
     }
   }
 

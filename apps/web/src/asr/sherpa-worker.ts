@@ -280,12 +280,16 @@ class TranscriptionPipeline {
   finalizeSegment(from, to) {
     if (to <= from) return;
     this.partialFloor = to;
-    post({ type: 'partial', text: '' });
     const audio = this.historySlice(from, to);
     const result = this.transcribe(audio);
+    // 跳过空段/纯标点段（短噪音常识别成「。」）：无确定文本被丢弃，清空识别区，回到「聆听中」
     if (!result.text || !/[\p{L}\p{N}]/u.test(result.text)) {
+      post({ type: 'partial', text: '' });
       return;
     }
+    // 有结果时不在解码前清 partial：整段最终解码独立且较慢，若先清空识别区，会先空、解码完才上屏，
+    // 造成"识别区文字消失→确定句延迟出现"的断档。改由 onSegment 到达时清（UI 收到 segment 即清 partial），
+    // 让识别文字向下淡出与确定句落入同刻发生。
     post({
       type: 'segment',
       id: this.segmentId++,

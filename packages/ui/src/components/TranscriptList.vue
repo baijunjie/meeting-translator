@@ -3,6 +3,7 @@ import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import type { TranscriptLine } from '../composables/useTranscription';
 import { useScrollFade } from '../composables/useScrollFade';
 import ConversationLine from './ConversationLine.vue';
+import TranslatingDots from './TranslatingDots.vue';
 
 const props = defineProps<{
   lines: TranscriptLine[];
@@ -26,9 +27,9 @@ const historyLines = computed(() => reversed.value.slice(1));
 
 const hasContent = computed(() => props.lines.length > 0 || !!props.partial);
 
-// 识别区只在录音时显示：录音中才存在"实时识别/聆听"，停止后应隐藏（不再显示「聆听中…」）。
-// 绑定到 recording（整段会话恒为 true）还顺带避免了首句确认时 partial 先清空、segment 后到达
-// 造成的 unmount→remount 入场动画重播（partial/segment 分两次 IPC 到达的根因）。
+// 识别区只在录音时显示：录音中才存在"实时识别/聆听"，停止后隐藏（不再显示「聆听中…」）。
+// 绑定 recording（整段会话恒为 true）而非 partial：外层盒子整段不重建，
+// partial↔「聆听中」的切换只走内层过渡，不会重播外层盒子的入场动画。
 const recogVisible = computed(() => !!props.recording);
 
 // 历史新增时的滚动策略：
@@ -108,27 +109,42 @@ const trLineHeight = 'calc((var(--transcript-size) + 7px) * 1.45)';
     <!-- 顶部固定区：实时识别 +「最新确定句（含翻译）」，不随历史滚动。两区高度固定、互不影响。
          入场/退场统一用 <transition name="rise">：升起淡入、下沉淡出。
          识别区绑定 recogVisible（录音会话）、确定句外层盒子绑定 latest，二者整段会话内都不会重建，
-         故各自只在出现时升起一次、消失时沉出一次；内部内容切换走各自独立的 <transition>（card / tr-fade）。 -->
+         故各自只在出现时升起一次、消失时沉出一次；内部内容切换各走独立的 <transition>。 -->
     <div class="shrink-0">
-      <!-- 识别区（橙色、虚线框，区别于蓝色确定句区）：进行中显示 partial，停顿时显示提示。内部内容直接切换、不做过渡 -->
+      <!-- 识别区：进行中显示实时识别文字（partial），停顿时显示「聆听中」提示 -->
       <transition name="rise">
         <div
           v-if="recogVisible"
           :style="{ minHeight: recogHeight }"
           class="mx-auto mt-5 flex max-w-[88%] items-center justify-center rounded-2xl border border-dashed border-amber-500/45 bg-amber-500/[0.07] px-6 py-6 text-center max-sm:mt-3 max-sm:max-w-[94%] max-sm:px-4 max-sm:py-4"
         >
-          <div
-            v-if="partial"
-            :class="[CUR_TEXT, 'font-semibold leading-snug text-amber-700 dark:text-amber-300']"
-          >
-            {{ partial }}
-          </div>
-          <div
-            v-else
-            :class="[CUR_TEXT, 'font-medium leading-snug text-amber-700/45 dark:text-amber-300/45']"
-          >
-            {{ listeningHint }}
-          </div>
+          <!-- 已识别文字↔「聆听中」切换：识别完成、句子落入确定句区时，识别文字向下淡出（呼应确定句区
+               新句的向下淡入 card 入场）。位移只作用在"已识别文字"上；「聆听中」占位仅做无位移的淡入淡出。
+               out-in 保证先淡出再切换，两分支各带稳定 key，故识别中 partial 文本原地更新不触发过渡。 -->
+          <transition name="recog" mode="out-in">
+            <div
+              v-if="partial"
+              key="partial"
+              :class="[
+                'recog-text',
+                CUR_TEXT,
+                'font-semibold leading-snug text-amber-700 dark:text-amber-300',
+              ]"
+            >
+              {{ partial }}
+            </div>
+            <div
+              v-else
+              key="hint"
+              :class="[
+                'recog-hint',
+                CUR_TEXT,
+                'font-medium leading-snug text-amber-700/45 dark:text-amber-300/45',
+              ]"
+            >
+              {{ listeningHint }}
+            </div>
+          </transition>
         </div>
       </transition>
 
@@ -144,14 +160,24 @@ const trLineHeight = 'calc((var(--transcript-size) + 7px) * 1.45)';
               <div :class="[CUR_TEXT, 'font-semibold leading-snug text-neutral-900 dark:text-white']">
                 {{ latest.text }}
               </div>
-              <!-- 开启翻译时始终预留译文行高度：译文异步到达时只淡入、不撑高，避免文字被顶动 -->
+              <!-- 开启翻译时始终预留译文行高度：翻译进行中显示"翻译中"等待动画，译文到达后淡出换成译文；
+                   同语言等无需翻译的场景两者皆无、留空即可。全程不撑高，避免文字被顶动。 -->
               <div v-if="translateOn" class="mt-3.5 max-sm:mt-2" :style="{ minHeight: trLineHeight }">
-                <transition name="tr-fade">
+                <transition name="tr-fade" mode="out-in">
                   <div
                     v-if="latest.translation"
+                    key="tr"
                     :class="[CUR_TR, 'leading-snug text-blue-600 dark:text-[#9db0ff]']"
                   >
                     {{ latest.translation }}
+                  </div>
+                  <div
+                    v-else-if="latest.translating"
+                    key="wait"
+                    :style="{ minHeight: trLineHeight }"
+                    :class="[CUR_TR, 'flex items-center justify-center leading-snug text-blue-600/60 dark:text-[#9db0ff]/60']"
+                  >
+                    <TranslatingDots />
                   </div>
                 </transition>
               </div>
@@ -176,6 +202,7 @@ const trLineHeight = 'calc((var(--transcript-size) + 7px) * 1.45)';
           :time="line.time"
           :text="line.text"
           :translation="line.translation"
+          :translating="line.translating"
           dim
         />
       </transition-group>
@@ -187,33 +214,57 @@ const trLineHeight = 'calc((var(--transcript-size) + 7px) * 1.45)';
 /* 两个大文字框统一的入场/退场：升起淡入、下沉淡出。
    外层盒子整段会话不重建，故入场只在出现时播一次、退场只在消失时播一次。 */
 .rise-enter-active {
-  transition: opacity 0.4s cubic-bezier(0.22, 0.61, 0.36, 1),
-    transform 0.4s cubic-bezier(0.22, 0.61, 0.36, 1);
+  transition: opacity 0.2s cubic-bezier(0.22, 0.61, 0.36, 1),
+    transform 0.2s cubic-bezier(0.22, 0.61, 0.36, 1);
 }
 .rise-enter-from {
   opacity: 0;
   transform: translateY(18px) scale(0.96);
 }
 .rise-leave-active {
-  transition: opacity 0.28s ease, transform 0.28s ease;
+  transition: opacity 0.2s ease, transform 0.2s ease;
 }
 .rise-leave-to {
   opacity: 0;
   transform: translateY(-14px) scale(0.97);
 }
 
-/* 译文异步到达：在预留空间内淡入，不撑动文字 */
-.tr-fade-enter-active {
-  transition: opacity 0.25s ease;
+/* 识别区文字换页：已识别文字被确认、落入确定句区时向下淡出，与确定句区新句向下淡入（card 入场）呼应。
+   关键：向下位移只作用在"已识别文字"（.recog-text）上；「聆听中」占位（.recog-hint）仅做无位移的淡入淡出。 */
+.recog-enter-active {
+  transition: opacity 0.2s ease;
 }
-.tr-fade-enter-from {
+.recog-enter-from {
+  opacity: 0;
+}
+.recog-text.recog-leave-active {
+  transition: opacity 0.2s ease, transform 0.2s cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+.recog-text.recog-leave-to {
+  opacity: 0;
+  transform: translateY(18px) scale(0.985);
+}
+.recog-hint.recog-leave-active {
+  transition: opacity 0.2s ease;
+}
+.recog-hint.recog-leave-to {
+  opacity: 0;
+}
+
+/* 译文异步到达：在预留空间内先淡出"翻译中"动画、再淡入译文，不撑动文字 */
+.tr-fade-enter-active,
+.tr-fade-leave-active {
+  transition: opacity 0.2s ease;
+}
+.tr-fade-enter-from,
+.tr-fade-leave-to {
   opacity: 0;
 }
 
 /* 确定句卡片切换：新句从上方（识别区方向）落入，旧句向下离开（落向历史），形成自上而下的流动 */
 .card-enter-active {
-  transition: opacity 0.3s cubic-bezier(0.22, 0.61, 0.36, 1),
-    transform 0.3s cubic-bezier(0.22, 0.61, 0.36, 1);
+  transition: opacity 0.2s cubic-bezier(0.22, 0.61, 0.36, 1),
+    transform 0.2s cubic-bezier(0.22, 0.61, 0.36, 1);
 }
 .card-leave-active {
   transition: opacity 0.2s ease, transform 0.2s ease;
@@ -232,22 +283,39 @@ const trLineHeight = 'calc((var(--transcript-size) + 7px) * 1.45)';
    - 查看历史时（silent）：不做入场/位移，保持视口静止（见模板说明）；
    - 两种模式下离场（清屏）都淡出，保证退场也有动画。 */
 .drop-enter-active {
-  transition: opacity 0.3s ease, transform 0.3s ease;
+  transition: opacity 0.2s ease, transform 0.2s ease;
 }
 .drop-enter-from {
   opacity: 0;
   transform: translateY(-14px);
 }
 .drop-move {
-  transition: transform 0.3s ease;
+  transition: transform 0.2s ease;
 }
 .drop-leave-active,
 .silent-leave-active {
-  transition: opacity 0.25s ease, transform 0.25s ease;
+  transition: opacity 0.2s ease, transform 0.2s ease;
 }
 .drop-leave-to,
 .silent-leave-to {
   opacity: 0;
   transform: translateY(-10px);
+}
+
+/* 尊重系统「减少动态效果」：去掉所有位移/缩放，仅保留不致眩晕的透明度淡入淡出。 */
+@media (prefers-reduced-motion: reduce) {
+  .rise-enter-from,
+  .rise-leave-to,
+  .recog-text.recog-leave-to,
+  .card-enter-from,
+  .card-leave-to,
+  .drop-enter-from,
+  .drop-leave-to,
+  .silent-leave-to {
+    transform: none;
+  }
+  .drop-move {
+    transition: none;
+  }
 }
 </style>

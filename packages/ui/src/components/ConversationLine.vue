@@ -1,13 +1,21 @@
 <script setup lang="ts">
 // 一行对话：时间 + 原文 + 可选译文。主页历史与归档详情共用。
 // dim=true 用于主页历史（弱化，让当前句更突出）。
-defineProps<{ time: string; text: string; translation?: string; dim?: boolean }>();
+// translating=true 表示译文尚未到达、仍在翻译中：在译文区显示等待动画（归档详情不传，恒 false）。
+import TranslatingDots from './TranslatingDots.vue';
+defineProps<{
+  time: string;
+  text: string;
+  translation?: string;
+  dim?: boolean;
+  translating?: boolean;
+}>();
 </script>
 
 <template>
   <div class="mb-3.5 flex gap-3">
     <div
-      class="w-16 shrink-0 whitespace-nowrap pt-[3px] text-[11px] tabular-nums text-neutral-400 dark:text-neutral-500"
+      class="w-12 shrink-0 whitespace-nowrap pt-[3px] text-[11px] tabular-nums text-neutral-400 dark:text-neutral-500"
     >
       {{ time }}
     </div>
@@ -21,10 +29,11 @@ defineProps<{ time: string; text: string; translation?: string; dim?: boolean }>
         {{ text }}
       </div>
       <div
-        v-if="translation"
+        v-if="translation || translating"
         class="mt-1 border-l-2 border-blue-500 pl-2.5 text-[length:calc(var(--transcript-size)-1px)] leading-relaxed text-neutral-500 dark:text-neutral-400"
       >
-        {{ translation }}
+        <template v-if="translation">{{ translation }}</template>
+        <TranslatingDots v-else class="text-blue-500/70" />
       </div>
     </div>
   </div>

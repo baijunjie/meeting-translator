@@ -337,15 +337,18 @@ export class TranscriptionPipeline {
     if (to <= from) return;
     // 该段已最终确定，部分识别不应再回看到它之前
     this.partialFloor = to;
-    this.onPartial({ text: '' });
 
     const audio = this.historySlice(from, to);
     const result = this.transcribe(audio);
     // 跳过空段，以及只有标点/符号、没有任何文字数字的段（短噪音常被识别成「。」）
     if (!result.text || !/[\p{L}\p{N}]/u.test(result.text)) {
+      this.onPartial({ text: '' }); // 无确定文本被丢弃：清空识别区，回到「聆听中」
       return;
     }
 
+    // 有结果时不在此处清 partial：整段最终解码是独立的一遍、比逐次 partial 慢，
+    // 若解码前就清空识别区，会先空、解码完才上屏，造成"识别区文字消失→确定句延迟出现"的断档。
+    // 改由 onSegment 到达时清（UI 收到 segment 即清 partial），让识别文字向下淡出与确定句落入同刻发生。
     this.onSegment({
       id: this.segmentId++,
       text: result.text,

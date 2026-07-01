@@ -293,6 +293,20 @@ public class RealtimeAsrPlugin: CAPPlugin, CAPBridgedPlugin {
       pendingSamples.removeFirst(offset)
     }
 
+    // Drain finalized segments FIRST, so a finalized segment (+ its trailing partial:"") is
+    // emitted before any new-utterance partial from this same buffer. If a new utterance has
+    // already begun when the VAD closes the previous one, emitting the new partial first lets
+    // onSegment clobber it in the renderer and flicker the recognition→confirmation handoff.
+    while !vad.isEmpty() {
+      let segment = vad.front()
+      vad.pop()
+      finalizeSegment(samples: segment.samples, startSample: segment.start)
+      // A real final landed; clear the in-progress partial.
+      notifyListeners("partial", data: ["text": ""])
+      speechBuffer.removeAll(keepingCapacity: true)
+      lastPartialAtSamples = 0
+    }
+
     let speaking = vad.isSpeechDetected()
     if speaking {
       if !wasSpeechDetected {
@@ -304,19 +318,8 @@ public class RealtimeAsrPlugin: CAPPlugin, CAPBridgedPlugin {
       speechBuffer.append(contentsOf: samples)
       maybeEmitPartial()
     } else if wasSpeechDetected {
-      // Silence resumed — wait for the VAD to actually close the segment(s) below.
+      // Silence resumed — wait for the VAD to close the segment(s) above.
       wasSpeechDetected = false
-    }
-
-    // Drain any speech segments the VAD has finalized (min-silence / max-speech reached).
-    while !vad.isEmpty() {
-      let segment = vad.front()
-      vad.pop()
-      finalizeSegment(samples: segment.samples, startSample: segment.start)
-      // A real final landed; clear the in-progress partial.
-      notifyListeners("partial", data: ["text": ""])
-      speechBuffer.removeAll(keepingCapacity: true)
-      lastPartialAtSamples = 0
     }
   }
 
