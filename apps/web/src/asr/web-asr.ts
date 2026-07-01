@@ -4,7 +4,7 @@
 // WASM（Silero VAD + SenseVoice）」的实时识别管线，stop() 拆除。
 //
 // 架构：
-//  - 采麦：getUserMedia + AudioContext(16k) + AudioWorklet（见 ./pcm-worklet.ts），每 100ms 一帧。
+//  - 采麦：getUserMedia + AudioContext(16k) + AudioWorklet（见 ./pcm-worklet.js），每 100ms 一帧。
 //  - 识别：放在经典 Web Worker（./sherpa-worker.ts，importScripts 加载 Emscripten 胶水）里跑，
 //    主线程只负责把帧 postMessage 过去，避免 WASM 解码阻塞 UI。
 //  - 模型：start 前确保 @rt/core ASR_MODELS 已下载并缓存（Cache Storage），再把字节传给 Worker
@@ -139,8 +139,9 @@ export class WebAsr {
         await this.audioCtx.resume();
       }
 
-      // 加载 AudioWorklet 处理器（Vite 的 ?url 拿到打包后地址）。
-      const url = new URL('./pcm-worklet.ts', import.meta.url);
+      // 加载 AudioWorklet 处理器。必须引用 .js：生产构建会把它内联成 data URL，
+      // 扩展名决定 MIME —— .ts 会得到 video/mp2t 被 worklet 加载器拒收（见 pcm-worklet.js 头注）。
+      const url = new URL('./pcm-worklet.js', import.meta.url);
       await this.audioCtx.audioWorklet.addModule(url);
 
       this.source = this.audioCtx.createMediaStreamSource(this.stream);
