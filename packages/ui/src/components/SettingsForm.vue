@@ -169,11 +169,11 @@ watch(() => props.form.fontSize, (v) => applyFontSize(v));
       <n-form-item :label="t('settings.baseUrl')">
         <n-input v-model:value="form.cloud.baseURL" placeholder="https://api.openai.com/v1" />
       </n-form-item>
-      <n-form-item :label="t('settings.apiKey')">
-        <n-input v-model:value="form.cloud.apiKey" type="password" show-password-on="click" placeholder="sk-..." />
-      </n-form-item>
       <n-form-item :label="t('settings.model')">
         <n-input v-model:value="form.cloud.model" placeholder="gpt-4o-mini" />
+      </n-form-item>
+      <n-form-item :label="t('settings.apiKey')">
+        <n-input v-model:value="form.cloud.apiKey" type="password" show-password-on="click" placeholder="sk-..." />
       </n-form-item>
       <p class="mt-1 text-xs text-neutral-500 dark:text-neutral-400">{{ t('settings.cloudHint') }}</p>
 
