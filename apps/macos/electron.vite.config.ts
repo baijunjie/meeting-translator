@@ -11,14 +11,14 @@ const root = fileURLToPath(new URL('.', import.meta.url));
 // 默认布局：main = src/main/index.ts，preload = src/preload/index.ts，
 // renderer root = src/renderer（index.html）。v5 默认外部化依赖，
 // 因此 sherpa-onnx-node / onnxruntime-node 等原生模块在主进程保持 require、不被打包。
-// 例外：@mt/core 以 TS 源码消费，必须打进 main/preload 产物（不能外部化），
-// 否则 out 里会留下 require("@mt/core") 在运行时找不到而崩溃。
+// 例外：@rt/core 以 TS 源码消费，必须打进 main/preload 产物（不能外部化），
+// 否则 out 里会留下 require("@rt/core") 在运行时找不到而崩溃。
 export default defineConfig({
   main: {
-    plugins: [externalizeDepsPlugin({ exclude: ['@mt/core'] })],
+    plugins: [externalizeDepsPlugin({ exclude: ['@rt/core'] })],
   },
   preload: {
-    plugins: [externalizeDepsPlugin({ exclude: ['@mt/core'] })],
+    plugins: [externalizeDepsPlugin({ exclude: ['@rt/core'] })],
   },
   renderer: {
     resolve: {

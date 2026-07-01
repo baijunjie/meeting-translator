@@ -7,7 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		1A6D4AE6D090F18410C1E3B4 /* MeetingTranslate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 24C7999A5D4CCBBBD23E16E7 /* MeetingTranslate.swift */; };
+		1A6D4AE6D090F18410C1E3B4 /* RealtimeTranslate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 24C7999A5D4CCBBBD23E16E7 /* RealtimeTranslate.swift */; };
 		1B83F307931ADA605C09217D /* SherpaOnnx.swift in Sources */ = {isa = PBXBuildFile; fileRef = D081CE749145DD9E4074D805 /* SherpaOnnx.swift */; };
 		2FAD9763203C412B000D30F8 /* config.xml in Resources */ = {isa = PBXBuildFile; fileRef = 2FAD9762203C412B000D30F8 /* config.xml */; };
 		4241387FAF826C386713FA75 /* sherpa-onnx.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 2A8A9242AD8B78B0DC07F8DA /* sherpa-onnx.xcframework */; };
@@ -17,7 +17,7 @@
 		504EC30F1FED79650016851F /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 504EC30E1FED79650016851F /* Assets.xcassets */; };
 		504EC3121FED79650016851F /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 504EC3101FED79650016851F /* LaunchScreen.storyboard */; };
 		50B271D11FEDC1A000F3C39B /* public in Resources */ = {isa = PBXBuildFile; fileRef = 50B271D01FEDC1A000F3C39B /* public */; };
-		864CBBF16324C1946F7E7200 /* MeetingAsrPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0CA9B0BC19BA6ECBE6FD88BB /* MeetingAsrPlugin.swift */; };
+		864CBBF16324C1946F7E7200 /* RealtimeAsrPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0CA9B0BC19BA6ECBE6FD88BB /* RealtimeAsrPlugin.swift */; };
 		8DF48267CFE3082995012588 /* onnxruntime.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = B0206D6C3E858638F9118DF9 /* onnxruntime.xcframework */; };
 		9B9D9044DB6C3D71CBC4EA28 /* AsrModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F5131C936437C7216AA4AE8 /* AsrModels.swift */; };
 		A084ECDBA7D38E1E42DFC39D /* Pods_App.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = AF277DCFFFF123FFC6DF26C7 /* Pods_App.framework */; };
@@ -40,8 +40,8 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
-		0CA9B0BC19BA6ECBE6FD88BB /* MeetingAsrPlugin.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = MeetingAsrPlugin.swift; path = "../../native-plugin/ios/MeetingAsrPlugin.swift"; sourceTree = SOURCE_ROOT; };
-		24C7999A5D4CCBBBD23E16E7 /* MeetingTranslate.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = MeetingTranslate.swift; path = "../../native-plugin/ios/MeetingTranslate.swift"; sourceTree = SOURCE_ROOT; };
+		0CA9B0BC19BA6ECBE6FD88BB /* RealtimeAsrPlugin.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = RealtimeAsrPlugin.swift; path = "../../native-plugin/ios/RealtimeAsrPlugin.swift"; sourceTree = SOURCE_ROOT; };
+		24C7999A5D4CCBBBD23E16E7 /* RealtimeTranslate.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = RealtimeTranslate.swift; path = "../../native-plugin/ios/RealtimeTranslate.swift"; sourceTree = SOURCE_ROOT; };
 		2A8A9242AD8B78B0DC07F8DA /* sherpa-onnx.xcframework */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = wrapper.xcframework; name = "sherpa-onnx.xcframework"; path = "Frameworks/sherpa-onnx.xcframework"; sourceTree = SOURCE_ROOT; };
 		2FAD9762203C412B000D30F8 /* config.xml */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = config.xml; sourceTree = "<group>"; };
 		50379B222058CBB4000EE86E /* capacitor.config.json */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.json; path = capacitor.config.json; sourceTree = "<group>"; };
@@ -93,7 +93,7 @@
 				504EC3051FED79650016851F /* Products */,
 				7F8756D8B27F46E3366F6CEA /* Pods */,
 				27E2DDA53C4D2A4D1A88CE4A /* Frameworks */,
-				E5834307BEFB946AF62CA1A4 /* MeetingAsr */,
+				E5834307BEFB946AF62CA1A4 /* RealtimeAsr */,
 			);
 			sourceTree = "<group>";
 		};
@@ -130,16 +130,16 @@
 			name = Pods;
 			sourceTree = "<group>";
 		};
-		E5834307BEFB946AF62CA1A4 /* MeetingAsr */ = {
+		E5834307BEFB946AF62CA1A4 /* RealtimeAsr */ = {
 			isa = PBXGroup;
 			children = (
-				0CA9B0BC19BA6ECBE6FD88BB /* MeetingAsrPlugin.swift */,
+				0CA9B0BC19BA6ECBE6FD88BB /* RealtimeAsrPlugin.swift */,
 				D081CE749145DD9E4074D805 /* SherpaOnnx.swift */,
 				9F5131C936437C7216AA4AE8 /* AsrModels.swift */,
 				842304C80563EAA760A3E627 /* App-Bridging-Header.h */,
-				24C7999A5D4CCBBBD23E16E7 /* MeetingTranslate.swift */,
+				24C7999A5D4CCBBBD23E16E7 /* RealtimeTranslate.swift */,
 			);
-			name = MeetingAsr;
+			name = RealtimeAsr;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -257,11 +257,11 @@
 			buildActionMask = 2147483647;
 			files = (
 				504EC3081FED79650016851F /* AppDelegate.swift in Sources */,
-				864CBBF16324C1946F7E7200 /* MeetingAsrPlugin.swift in Sources */,
+				864CBBF16324C1946F7E7200 /* RealtimeAsrPlugin.swift in Sources */,
 				1B83F307931ADA605C09217D /* SherpaOnnx.swift in Sources */,
 				9B9D9044DB6C3D71CBC4EA28 /* AsrModels.swift in Sources */,
 				F9BEFA2C0C91447250B6AAD1 /* MainViewController.swift in Sources */,
-				1A6D4AE6D090F18410C1E3B4 /* MeetingTranslate.swift in Sources */,
+				1A6D4AE6D090F18410C1E3B4 /* RealtimeTranslate.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -418,7 +418,7 @@
 					"-lc++",
 				);
 				OTHER_SWIFT_FLAGS = "$(inherited) \"-D\" \"COCOAPODS\" \"-DDEBUG\"";
-				PRODUCT_BUNDLE_IDENTIFIER = io.github.baijunjie.meetingtranslator;
+				PRODUCT_BUNDLE_IDENTIFIER = io.github.baijunjie.realtimetranslator;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
 				SWIFT_OBJC_BRIDGING_HEADER = "$(PROJECT_DIR)/../../native-plugin/ios/App-Bridging-Header.h";
@@ -450,7 +450,7 @@
 					"$(inherited)",
 					"-lc++",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = io.github.baijunjie.meetingtranslator;
+				PRODUCT_BUNDLE_IDENTIFIER = io.github.baijunjie.realtimetranslator;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "";
 				SWIFT_OBJC_BRIDGING_HEADER = "$(PROJECT_DIR)/../../native-plugin/ios/App-Bridging-Header.h";

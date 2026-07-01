@@ -1,4 +1,4 @@
-# iOS native integration — `MeetingAsr` plugin
+# iOS native integration — `RealtimeAsr` plugin
 
 On-device ASR for the iOS (Capacitor) app: **Silero VAD + SenseVoice** via
 [k2-fsa/sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx), captured with `AVAudioEngine`.
@@ -12,13 +12,13 @@ What was written and is ready to wire in (`apps/ios/native-plugin/ios/`):
 
 | File | Role |
 | --- | --- |
-| `MeetingAsrPlugin.swift` | The plugin: mic capture → 16 kHz mono Float32 → Silero VAD → SenseVoice; emits `partial`/`segment`/`status`/`setupProgress`; `start`/`stop`/`getSetupStatus`/`downloadModels`/`getMicStatus`/`openMicSettings`. **Fully implemented.** |
+| `RealtimeAsrPlugin.swift` | The plugin: mic capture → 16 kHz mono Float32 → Silero VAD → SenseVoice; emits `partial`/`segment`/`status`/`setupProgress`; `start`/`stop`/`getSetupStatus`/`downloadModels`/`getMicStatus`/`openMicSettings`. **Fully implemented.** |
 | 注册方式 | 插件实现 `CAPBridgedPlugin`（`identifier`/`jsName`/`pluginMethods`）。Capacitor 7 只自动注册 pod 插件，本插件编在 App target，故由 `ios/App/App/MainViewController.swift`（`CAPBridgeViewController` 子类）在 `capacitorDidLoad()` 调 `bridge?.registerPluginInstance(...)` 手动注册。已弃用旧的 `.m` / `CAP_PLUGIN` 宏。 |
 | `SherpaOnnx.swift` | The **official sherpa-onnx Swift wrapper**, vendored verbatim from tag `v1.13.3` (Apache-2.0). Wraps the C API as `SherpaOnnxOfflineRecognizer`, `SherpaOnnxVoiceActivityDetectorWrapper`, etc. |
 | `App-Bridging-Header.h` | ObjC→Swift bridging header; `#import "sherpa-onnx/c-api/c-api.h"` (also vendored from `v1.13.3`). |
-| `AsrModels.swift` | **Generated** from `@mt/core`'s model registry (`pnpm --filter @mt/ios gen:models`). Model URLs / filenames / dirs / "is-complete" checklist — same source of truth as macOS. Do not edit by hand. |
+| `AsrModels.swift` | **Generated** from `@rt/core`'s model registry (`pnpm --filter @rt/ios gen:models`). Model URLs / filenames / dirs / "is-complete" checklist — same source of truth as macOS. Do not edit by hand. |
 
-The TS side is done and type-checks: `apps/ios/src/bridge.ts` (the `MeetingApi` impl)
+The TS side is done and type-checks: `apps/ios/src/bridge.ts` (the `AppBridge` impl)
 and `apps/ios/native-plugin/{definitions,index}.ts` (the JS plugin contract).
 
 ---
@@ -33,22 +33,22 @@ and `apps/ios/native-plugin/{definitions,index}.ts` (the JS plugin contract).
 ## 1. Build the web bundle + sync Capacitor
 
 ```bash
-pnpm --filter @mt/ios build      # → apps/ios/dist/
-pnpm --filter @mt/ios cap:sync   # = `cap sync ios`: copies dist/ + installs Capacitor pods
+pnpm --filter @rt/ios build      # → apps/ios/dist/
+pnpm --filter @rt/ios cap:sync   # = `cap sync ios`: copies dist/ + installs Capacitor pods
 ```
 
 `@capacitor/preferences` is already a dependency, so `cap sync` wires its pod automatically.
-(App icons, optional: `pnpm --filter @mt/ios icons`.)
+(App icons, optional: `pnpm --filter @rt/ios icons`.)
 
 ## 2. Regenerate the model registry Swift file (only if the registry changed)
 
-`apps/ios/native-plugin/ios/AsrModels.swift` is generated from `@mt/core`
+`apps/ios/native-plugin/ios/AsrModels.swift` is generated from `@rt/core`
 (`packages/core/src/models.ts`) so iOS and macOS never drift. It is committed, so you
 normally don't need to run this — but if you change the registry:
 
 ```bash
-pnpm --filter @mt/ios gen:models           # rewrite AsrModels.swift
-pnpm --filter @mt/ios gen:models --check    # CI: fail if it's stale
+pnpm --filter @rt/ios gen:models           # rewrite AsrModels.swift
+pnpm --filter @rt/ios gen:models --check    # CI: fail if it's stale
 ```
 
 ## 3. Add the sherpa-onnx xcframeworks to the App target
@@ -94,15 +94,15 @@ add both:
 本仓库已完成接线（提交在 `apps/ios/ios/`），无需手动操作；以下供了解/维护：
 
 - 规范源在 `native-plugin/ios/`，以**原地引用**方式（相对路径，非拷贝）加入 App target：
-  `MeetingAsrPlugin.swift` / `SherpaOnnx.swift` / `AsrModels.swift`，加上 app 壳层的
+  `RealtimeAsrPlugin.swift` / `SherpaOnnx.swift` / `AsrModels.swift`，加上 app 壳层的
   `ios/App/App/MainViewController.swift`。改这些文件无需再同步副本。
 - 桥接头让 `SherpaOnnx.swift` 看见 sherpa-onnx C API：
   `SWIFT_OBJC_BRIDGING_HEADER = $(PROJECT_DIR)/../../native-plugin/ios/App-Bridging-Header.h`；
   `HEADER_SEARCH_PATHS` 含 `$(PROJECT_DIR)/Frameworks/sherpa-onnx.xcframework/Headers`。
 - 注册：`MainViewController`（`CAPBridgeViewController` 子类）在 `capacitorDidLoad()` 调
-  `bridge?.registerPluginInstance(MeetingAsrPlugin())`，storyboard 已指向该子类。
-  插件 id / 方法名在 `index.ts`、`definitions.ts` 与 `MeetingAsrPlugin.swift` 的
-  `CAPBridgedPlugin`（`jsName = "MeetingAsr"` + `pluginMethods`）三处保持一致。
+  `bridge?.registerPluginInstance(RealtimeAsrPlugin())`，storyboard 已指向该子类。
+  插件 id / 方法名在 `index.ts`、`definitions.ts` 与 `RealtimeAsrPlugin.swift` 的
+  `CAPBridgedPlugin`（`jsName = "RealtimeAsr"` + `pluginMethods`）三处保持一致。
 
 ## 5. Microphone permission
 
@@ -110,7 +110,7 @@ Already added to `apps/ios/ios/App/App/Info.plist`:
 
 ```xml
 <key>NSMicrophoneUsageDescription</key>
-<string>Meeting Translator uses the microphone to transcribe and translate meetings on your device.</string>
+<string>Realtime Translator uses the microphone to transcribe and translate speech on your device.</string>
 ```
 
 (Capacitor does not inject arbitrary Info.plist privacy strings from `capacitor.config.ts`,
@@ -133,13 +133,13 @@ The app **downloads the models on first run** (no large binaries committed / bun
   sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17/model.int8.onnx (~228 MB)
 ```
 
-URLs/filenames/dirs come from `AsrModels.swift` (generated from `@mt/core`), identical to
+URLs/filenames/dirs come from `AsrModels.swift` (generated from `@rt/core`), identical to
 what macOS downloads. The TS bridge already routes `downloadAsrModels()` → plugin
 `downloadModels()` and forwards `setupProgress` → `onSetupProgress`.
 
 **Optional — bundle instead of download** (to skip the ~230 MB first-run download): add the
 three files to the App target as resources, then change `modelsDir()` in
-`MeetingAsrPlugin.swift` to resolve from `Bundle.main` (and `modelsReady()` accordingly).
+`RealtimeAsrPlugin.swift` to resolve from `Bundle.main` (and `modelsReady()` accordingly).
 Downloading is the default to keep the app binary small.
 
 > The ~228 MB `model.int8.onnx` download can outlive a foreground session. The current
@@ -152,10 +152,10 @@ Once the Simulator runtime is installed (or on a device):
 
 ```bash
 # After any web change: rebuild + copy into the native project.
-pnpm --filter @mt/ios build && pnpm --filter @mt/ios cap:sync
+pnpm --filter @rt/ios build && pnpm --filter @rt/ios cap:sync
 
 # Open Xcode and run (Cmd-R) on a simulator or device:
-pnpm --filter @mt/ios exec cap open ios
+pnpm --filter @rt/ios exec cap open ios
 
 # Or fully from the CLI (example — adjust scheme/destination):
 xcodebuild -workspace apps/ios/ios/App/App.xcworkspace -scheme App \
@@ -208,18 +208,18 @@ strips any `<|…|>` wrapping so its output matches macOS.
 
 ## Platform notes / what differs from macOS
 
-- **Audio capture is native, not `getUserMedia`.** The `MeetingAsr` plugin captures the mic
+- **Audio capture is native, not `getUserMedia`.** The `RealtimeAsr` plugin captures the mic
   with `AVAudioEngine` and runs the whole pipeline natively; the TS bridge does not send
   audio. (`public/audio-worklet.js` is kept for parity but does not feed the recognizer.)
 
 - **Translation is cloud-only (for now).** `apps/ios/src/bridge.ts` runs translation in JS via
-  `@mt/core`'s `CloudTranslator`. Selecting the local `m2m100` engine emits a
+  `@rt/core`'s `CloudTranslator`. Selecting the local `m2m100` engine emits a
   `translation:status` `error` — on-device translation is deferred on iOS (no
-  onnxruntime-mobile translator yet). Future work: a `MeetingTranslate` native plugin
-  mirroring `MeetingAsr`, or a Core ML conversion.
+  onnxruntime-mobile translator yet). Future work: a `RealtimeTranslate` native plugin
+  mirroring `RealtimeAsr`, or a Core ML conversion.
 
 - **Storage** uses `@capacitor/preferences` (async KV) for settings + archives, reusing the
-  platform-agnostic pure logic in `@mt/core`.
+  platform-agnostic pure logic in `@rt/core`.
 
 ## Pipeline behavior vs the macOS reference
 

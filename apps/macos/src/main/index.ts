@@ -41,7 +41,7 @@ function createWindow(): void {
   win = new BrowserWindow({
     width: 1100,
     height: 760,
-    title: 'Meeting Translator',
+    title: 'Realtime Translator',
     ...(app.isPackaged ? {} : { icon: APP_ICON }),
     webPreferences: {
       preload: path.join(__dirname, '../preload/index.js'),

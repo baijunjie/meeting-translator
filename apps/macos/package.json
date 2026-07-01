@@ -1,7 +1,7 @@
 {
-  "name": "@mt/macos",
+  "name": "@rt/macos",
   "version": "0.1.0-beta.1",
-  "description": "Local real-time meeting transcription for macOS",
+  "description": "Local, real-time speech transcription & translation for macOS",
   "main": "./out/main/index.js",
   "scripts": {
     "dev": "electron-vite dev",
@@ -28,8 +28,8 @@
   },
   "devDependencies": {
     "@lucide/vue": "catalog:",
-    "@mt/core": "workspace:*",
-    "@mt/ui": "workspace:*",
+    "@rt/core": "workspace:*",
+    "@rt/ui": "workspace:*",
     "@tailwindcss/vite": "catalog:",
     "@types/node": "catalog:",
     "@vitejs/plugin-vue": "catalog:",

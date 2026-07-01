@@ -1,7 +1,7 @@
 @import "tailwindcss";
 
-/* 跨工作区包扫描：本 CSS 被 @mt/macos 渲染层以依赖形式导入，
-   Tailwind 默认从导入方 cwd 自动探测，未必覆盖到 @mt/ui 内的 .vue/.ts 源码，
+/* 跨工作区包扫描：本 CSS 被 @rt/macos 渲染层以依赖形式导入，
+   Tailwind 默认从导入方 cwd 自动探测，未必覆盖到 @rt/ui 内的 .vue/.ts 源码，
    显式声明此包的源码目录，避免组件里的工具类被 purge 掉。 */
 @source "./**/*.{vue,ts}";
 

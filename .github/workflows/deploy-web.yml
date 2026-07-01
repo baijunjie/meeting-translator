@@ -41,11 +41,11 @@ jobs:
           node-version: 22
           cache: pnpm
 
-      # 只装 @mt/web 子图（@mt/core / @mt/ui + 其依赖），跳过 macOS/iOS 的 electron 等重依赖。
-      - run: pnpm install --frozen-lockfile --filter "@mt/web..."
+      # 只装 @rt/web 子图（@rt/core / @rt/ui + 其依赖），跳过 macOS/iOS 的 electron 等重依赖。
+      - run: pnpm install --frozen-lockfile --filter "@rt/web..."
 
       - name: Build (base = /<repo>/)
-        run: pnpm --filter @mt/web build
+        run: pnpm --filter @rt/web build
         env:
           # GitHub Pages 项目站点的子路径；与仓库名一致。
           BASE_PATH: /${{ github.event.repository.name }}/

@@ -1,7 +1,7 @@
 import { ref, computed } from 'vue';
 import { i18n } from '../i18n';
 import { bridge } from '../bridge';
-import type { AppSettings, FontSize, ThemePref, UiLang } from '@mt/core';
+import type { AppSettings, FontSize, ThemePref, UiLang } from '@rt/core';
 
 const FONT_PX: Record<FontSize, string> = { small: '13px', medium: '15px', large: '18px' };
 

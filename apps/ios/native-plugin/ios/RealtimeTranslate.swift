@@ -1,6 +1,6 @@
 //
-//  MeetingTranslate.swift
-//  Meeting Translator — iOS on-device translation Capacitor plugin.
+//  RealtimeTranslate.swift
+//  Realtime Translator — iOS on-device translation Capacitor plugin.
 //
 //  On-device (offline) text translation using Apple's `Translation` framework
 //  (iOS 18+). This is the iOS counterpart to the desktop M2M100 local translator:
@@ -53,11 +53,11 @@ import Translation
 #endif
 import SwiftUI
 
-@objc(MeetingTranslatePlugin)
-public class MeetingTranslatePlugin: CAPPlugin, CAPBridgedPlugin {
+@objc(RealtimeTranslatePlugin)
+public class RealtimeTranslatePlugin: CAPPlugin, CAPBridgedPlugin {
   // Capacitor 6+ discovers plugins via CAPBridgedPlugin (replaces the old .m / CAP_PLUGIN macro).
-  public let identifier = "MeetingTranslatePlugin"
-  public let jsName = "MeetingTranslate"
+  public let identifier = "RealtimeTranslatePlugin"
+  public let jsName = "RealtimeTranslate"
   public let pluginMethods: [CAPPluginMethod] = [
     CAPPluginMethod(name: "translate", returnType: CAPPluginReturnPromise),
     CAPPluginMethod(name: "availability", returnType: CAPPluginReturnPromise),

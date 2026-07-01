@@ -1,15 +1,15 @@
 // AsrModels.swift — GENERATED, do not edit by hand.
 //
-// 由 apps/ios/native-plugin/scripts/gen-asr-models-swift.mjs 从 @mt/core 的共享
+// 由 apps/ios/native-plugin/scripts/gen-asr-models-swift.mjs 从 @rt/core 的共享
 // ASR 模型登记表（packages/core/src/models.ts）生成。登记表变更后请重跑：
-//   pnpm --filter @mt/ios gen:models
+//   pnpm --filter @rt/ios gen:models
 //
 // 与 macOS 端 (apps/macos/src/main/model-downloader.ts) 消费同一份登记表，保证
 // URL/文件名/目录/校验清单不漂移。
 
 import Foundation
 
-/// 单个需下载的 ASR 模型文件（对应 @mt/core 的 AsrModelFile）。
+/// 单个需下载的 ASR 模型文件（对应 @rt/core 的 AsrModelFile）。
 struct AsrModelFile {
   /// 远程下载地址（URLSession 会自动跟随 GitHub/HF 重定向）。
   let url: String

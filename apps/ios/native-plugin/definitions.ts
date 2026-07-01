@@ -1,6 +1,6 @@
-// MeetingAsr / MeetingTranslate 原生插件的 JS 类型契约。
-// 原生实现见 ./ios/MeetingAsrPlugin.swift（sherpa-onnx 端上 ASR + AVAudioEngine 采集）
-// 与 ./ios/MeetingTranslate.swift（Apple Translation 框架端上翻译，iOS 18+）。
+// RealtimeAsr / RealtimeTranslate 原生插件的 JS 类型契约。
+// 原生实现见 ./ios/RealtimeAsrPlugin.swift（sherpa-onnx 端上 ASR + AVAudioEngine 采集）
+// 与 ./ios/RealtimeTranslate.swift（Apple Translation 框架端上翻译，iOS 18+）。
 // 桥接层（apps/ios/src/bridge.ts）只依赖这些类型，不关心原生如何实现。
 
 import type { PluginListenerHandle } from '@capacitor/core';
@@ -10,10 +10,10 @@ import type {
   StatusPayload,
   SetupStatus,
   SetupProgress,
-} from '@mt/core';
+} from '@rt/core';
 
 /** 插件向 JS 发的事件名 → 事件载荷类型 */
-export interface MeetingAsrEventMap {
+export interface RealtimeAsrEventMap {
   /** 实时部分识别结果（说话过程中持续更新；text 为空表示清除） */
   partial: PartialPayload;
   /** 一段最终确定的识别结果 */
@@ -24,7 +24,7 @@ export interface MeetingAsrEventMap {
   setupProgress: SetupProgress;
 }
 
-export interface MeetingAsrPlugin {
+export interface RealtimeAsrPlugin {
   /**
    * 启动端上 ASR 管线：加载模型（若已就绪）、打开麦克风（AVAudioEngine，16kHz 单声道）、
    * 开始识别。后续通过 'partial' / 'segment' / 'status' 事件回吐结果。
@@ -44,16 +44,16 @@ export interface MeetingAsrPlugin {
    */
   downloadModels(): Promise<{ ok: boolean; error?: string }>;
 
-  /** 查询麦克风权限状态（映射到 @mt/core 的 MicPermission）。 */
+  /** 查询麦克风权限状态（映射到 @rt/core 的 MicPermission）。 */
   getMicStatus(): Promise<{ status: string }>;
 
   /** 打开系统设置（iOS 应用设置页，供用户授予麦克风权限）。 */
   openMicSettings(): Promise<void>;
 
   /** 订阅插件事件，返回可用于反注册的句柄。 */
-  addListener<E extends keyof MeetingAsrEventMap>(
+  addListener<E extends keyof RealtimeAsrEventMap>(
     eventName: E,
-    listenerFunc: (data: MeetingAsrEventMap[E]) => void,
+    listenerFunc: (data: RealtimeAsrEventMap[E]) => void,
   ): Promise<PluginListenerHandle>;
 
   /** 移除该插件的所有监听。 */
@@ -77,14 +77,14 @@ export interface TranslateAvailability {
 }
 
 /**
- * MeetingTranslate：Apple Translation 框架的端上（离线）文本翻译（iOS 18+）。
- * 原生实现见 ./ios/MeetingTranslate.swift。云翻译仍由 JS 侧 @mt/core CloudTranslator
+ * RealtimeTranslate：Apple Translation 框架的端上（离线）文本翻译（iOS 18+）。
+ * 原生实现见 ./ios/RealtimeTranslate.swift。云翻译仍由 JS 侧 @rt/core CloudTranslator
  * 承担（见 bridge.ts），二者为「云 / 设备端」两种引擎，互不替代。
  *
  * 短码：zh / en / ja / ko / yue（与 ASR/翻译规格一致）。zh-Hant 走 zh，繁體脚本后处理在 JS 侧；
  * yue 无对应 Apple 语言，尽力映射为 zh（不支持时返回 unavailable）。
  */
-export interface MeetingTranslatePlugin {
+export interface RealtimeTranslatePlugin {
   /**
    * 端上翻译一段文本（source/target 为短码）。永不 reject：
    * - 成功 → { text }

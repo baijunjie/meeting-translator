@@ -170,7 +170,7 @@ function openMicSettings(): void {
     <header
       class="flex items-center gap-3.5 border-b border-neutral-200 px-[18px] py-3 dark:border-[#3a3b44]"
     >
-      <span class="text-[15px] font-semibold">Meeting Translator</span>
+      <span class="text-[15px] font-semibold">Realtime Translator</span>
       <span v-if="errorText" class="text-xs text-red-500">{{ errorText }}</span>
 
       <div class="flex-1" />

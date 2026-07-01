@@ -1,14 +1,14 @@
-// iOS（Capacitor）平台桥接：实现 @mt/core 的 AppBridge，注入给 @mt/ui。
+// iOS（Capacitor）平台桥接：实现 @rt/core 的 AppBridge，注入给 @rt/ui。
 //
 // 各能力来源：
-//  - 设置 / 归档持久化：@capacitor/preferences（异步 KV），纯逻辑复用 @mt/core
+//  - 设置 / 归档持久化：@capacitor/preferences（异步 KV），纯逻辑复用 @rt/core
 //    （makeDefaults / withDefaults / listSummaries / makeArchiveId / toSummary）。
-//  - ASR：原生 Capacitor 插件 MeetingAsr（sherpa-onnx 端上识别 + AVAudioEngine 采集），
+//  - ASR：原生 Capacitor 插件 RealtimeAsr（sherpa-onnx 端上识别 + AVAudioEngine 采集），
 //    通过 'partial' / 'segment' / 'status' 事件回吐；startPipeline/stopPipeline 即启停整个会话
 //    （含原生采麦），无需 JS 侧送音频。
 //  - 翻译：segment 到达且开启翻译时翻成母语并触发 onTranslation，两种引擎：
-//    · engine==='cloud'  → JS 侧 @mt/core CloudTranslator（WebView 内 fetch）。
-//    · 否则（设备端）     → 原生插件 MeetingTranslate（Apple Translation 框架，iOS 18+，离线）。
+//    · engine==='cloud'  → JS 侧 @rt/core CloudTranslator（WebView 内 fetch）。
+//    · 否则（设备端）     → 原生插件 RealtimeTranslate（Apple Translation 框架，iOS 18+，离线）。
 //      不可用（iOS<18 / 不支持语言对 / 语言包缺失）时发 translation:status error 提示改用云翻译。
 //    繁體等目标脚本后处理沿用 M2M100_SPEC.toScript（两条路径一致）。
 //
@@ -26,7 +26,7 @@ import {
   makeArchiveId,
   CloudTranslator,
   M2M100_SPEC,
-} from '@mt/core';
+} from '@rt/core';
 import type {
   AppBridge,
   AppSettings,
@@ -42,8 +42,8 @@ import type {
   TranslationPayload,
   StatusPayload,
   TranslationStatusPayload,
-} from '@mt/core';
-import { MeetingAsr, MeetingTranslate } from '../native-plugin';
+} from '@rt/core';
+import { RealtimeAsr, RealtimeTranslate } from '../native-plugin';
 
 const SETTINGS_KEY = 'mt.settings';
 const ARCHIVES_KEY = 'mt.archives';
@@ -112,11 +112,11 @@ export function createIosBridge(): AppBridge {
     // 目标脚本后处理（zh-Hant 繁體化等）：模型/系统只产出一个 'zh'，繁體靠脚本转换兜底。
     const toScript = M2M100_SPEC.langs[s.nativeLang]?.toScript;
 
-    // —— 设备端（非云）翻译：Apple Translation 框架（iOS 18+），原生插件 MeetingTranslate ——
+    // —— 设备端（非云）翻译：Apple Translation 框架（iOS 18+），原生插件 RealtimeTranslate ——
     if (s.translation.engine !== 'cloud') {
       translationStatusCb?.({ state: 'loading' });
       try {
-        const r = await MeetingTranslate.translate({
+        const r = await RealtimeTranslate.translate({
           text: seg.text,
           source: seg.lang,
           target,
@@ -158,19 +158,19 @@ export function createIosBridge(): AppBridge {
   // ---- 订阅原生 ASR 插件事件，转发给 UI 注册的回调 ----
   // 纯浏览器预览（无原生壳）下 addListener 会 reject，吞掉即可，不影响 UI 挂载。
   function subscribeNative(): void {
-    void MeetingAsr.addListener('partial', (p) => partialCb?.(p)).catch(() => undefined);
-    void MeetingAsr.addListener('segment', (seg) => {
+    void RealtimeAsr.addListener('partial', (p) => partialCb?.(p)).catch(() => undefined);
+    void RealtimeAsr.addListener('segment', (seg) => {
       segmentCb?.(seg);
       void translateSegment(seg);
     }).catch(() => undefined);
-    void MeetingAsr.addListener('status', (s) => statusCb?.(s)).catch(() => undefined);
-    void MeetingAsr.addListener('setupProgress', (p) => setupProgressCb?.(p)).catch(
+    void RealtimeAsr.addListener('status', (s) => statusCb?.(s)).catch(() => undefined);
+    void RealtimeAsr.addListener('setupProgress', (p) => setupProgressCb?.(p)).catch(
       () => undefined,
     );
   }
   subscribeNative();
 
-  // ---- MicPermission 归一化（原生返回的字符串 → @mt/core 联合类型） ----
+  // ---- MicPermission 归一化（原生返回的字符串 → @rt/core 联合类型） ----
   function asMicPermission(v: string): MicPermission {
     return v === 'granted' ||
       v === 'denied' ||
@@ -184,7 +184,7 @@ export function createIosBridge(): AppBridge {
     // ===== ASR 管线（原生）=====
     async startPipeline(): Promise<StartResult> {
       try {
-        const r = await MeetingAsr.start();
+        const r = await RealtimeAsr.start();
         return { ok: r.ok, error: r.error };
       } catch (e) {
         return { ok: false, error: e instanceof Error ? e.message : String(e) };
@@ -192,7 +192,7 @@ export function createIosBridge(): AppBridge {
     },
     async stopPipeline(): Promise<{ ok: boolean }> {
       try {
-        return await MeetingAsr.stop();
+        return await RealtimeAsr.stop();
       } catch {
         return { ok: false };
       }
@@ -206,14 +206,14 @@ export function createIosBridge(): AppBridge {
     // ===== 麦克风权限（原生）=====
     async getMicStatus(): Promise<MicPermission> {
       try {
-        const r = await MeetingAsr.getMicStatus();
+        const r = await RealtimeAsr.getMicStatus();
         return asMicPermission(r.status);
       } catch {
         return 'unknown';
       }
     },
     openMicSettings(): void {
-      void MeetingAsr.openMicSettings().catch(() => undefined);
+      void RealtimeAsr.openMicSettings().catch(() => undefined);
     },
 
     // ===== 设置（Preferences）=====
@@ -232,7 +232,7 @@ export function createIosBridge(): AppBridge {
     // ===== 首次安装 / 模型下载（原生）=====
     async getSetupStatus(): Promise<SetupStatus> {
       try {
-        return await MeetingAsr.getSetupStatus();
+        return await RealtimeAsr.getSetupStatus();
       } catch {
         // 无原生壳（纯浏览器预览）：当作就绪，避免卡在首启引导。
         return { asrReady: true };
@@ -240,7 +240,7 @@ export function createIosBridge(): AppBridge {
     },
     async downloadAsrModels(): Promise<{ ok: boolean; error?: string }> {
       try {
-        return await MeetingAsr.downloadModels();
+        return await RealtimeAsr.downloadModels();
       } catch (e) {
         return { ok: false, error: e instanceof Error ? e.message : String(e) };
       }

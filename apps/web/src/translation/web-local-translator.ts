@@ -1,9 +1,9 @@
 // 浏览器端本地翻译：把 Transformers.js M2M100 的推理放到 Web Worker（见 ./translate-worker），
 // 主线程不被模型推理阻塞。本类是瘦代理：做语言码映射 + 同语言短路 + 繁體 toScript 后处理（都很轻），
-// 实际推理通过消息发给 worker、按 id 对应结果。模型差异收敛在 @mt/core 的 M2M100_SPEC。
+// 实际推理通过消息发给 worker、按 id 对应结果。模型差异收敛在 @rt/core 的 M2M100_SPEC。
 //
 // 对外 API（translate）与之前一致，故 bridge 无需改动。
-import { M2M100_SPEC, type LocalModelSpec } from '@mt/core';
+import { M2M100_SPEC, type LocalModelSpec } from '@rt/core';
 import type { ToTranslateWorker, FromTranslateWorker } from './translate-worker-protocol';
 
 /** Transformers.js progress_callback 回吐的进度对象（结构稳定字段）。 */

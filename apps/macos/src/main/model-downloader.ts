@@ -4,10 +4,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline as streamPipeline } from 'node:stream/promises';
-import { ASR_MODELS, requiredAsrFiles } from '@mt/core';
+import { ASR_MODELS, requiredAsrFiles } from '@rt/core';
 import type { SetupProgress } from '../shared/types';
 
-/** ASR 模型是否齐全（清单来自 @mt/core 的共享登记表） */
+/** ASR 模型是否齐全（清单来自 @rt/core 的共享登记表） */
 export function asrModelsReady(modelsDir: string): boolean {
   return requiredAsrFiles().every((f) => fs.existsSync(path.join(modelsDir, f)));
 }

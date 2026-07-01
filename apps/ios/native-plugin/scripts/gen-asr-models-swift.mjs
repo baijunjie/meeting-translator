@@ -1,4 +1,4 @@
-// 从 @mt/core 的共享 ASR 模型登记表生成 Swift 常量文件 AsrModels.swift。
+// 从 @rt/core 的共享 ASR 模型登记表生成 Swift 常量文件 AsrModels.swift。
 //
 // 目的：iOS 原生下载器 / 路径解析必须消费与 macOS 同一份登记表
 // （packages/core/src/models.ts 的 ASR_MODELS / requiredAsrFiles），不在 Swift 里
@@ -6,12 +6,12 @@
 // 因此用本脚本把登记表编译期“拍平”成一个生成的 Swift 文件并提交进仓库。
 //
 // 用法：
-//   pnpm --filter @mt/ios gen:models          # 写出 AsrModels.swift
-//   pnpm --filter @mt/ios gen:models --check   # 只校验已提交的生成物是否最新（CI 用）
+//   pnpm --filter @rt/ios gen:models          # 写出 AsrModels.swift
+//   pnpm --filter @rt/ios gen:models --check   # 只校验已提交的生成物是否最新（CI 用）
 //
-// @mt/core 以源码 TS 形式发布（main: src/index.ts，靠 bundler 消费），普通 Node ESM
+// @rt/core 以源码 TS 形式发布（main: src/index.ts，靠 bundler 消费），普通 Node ESM
 // 无法直接 import。models.ts 是“纯数据 + 类型”、不 import 任何运行时模块，故这里只用
-// esbuild 把这一个文件转成 JS 后动态 import，绕开 @mt/core 整个 barrel 的解析。
+// esbuild 把这一个文件转成 JS 后动态 import，绕开 @rt/core 整个 barrel 的解析。
 //
 // 注意：生成的 AsrModels.swift 是“生成物”，请勿手改——改 packages/core/src/models.ts 后重跑本脚本。
 
@@ -51,16 +51,16 @@ const requiredEntries = requiredAsrFiles()
 
 const out = `// AsrModels.swift — GENERATED, do not edit by hand.
 //
-// 由 apps/ios/native-plugin/scripts/gen-asr-models-swift.mjs 从 @mt/core 的共享
+// 由 apps/ios/native-plugin/scripts/gen-asr-models-swift.mjs 从 @rt/core 的共享
 // ASR 模型登记表（packages/core/src/models.ts）生成。登记表变更后请重跑：
-//   pnpm --filter @mt/ios gen:models
+//   pnpm --filter @rt/ios gen:models
 //
 // 与 macOS 端 (apps/macos/src/main/model-downloader.ts) 消费同一份登记表，保证
 // URL/文件名/目录/校验清单不漂移。
 
 import Foundation
 
-/// 单个需下载的 ASR 模型文件（对应 @mt/core 的 AsrModelFile）。
+/// 单个需下载的 ASR 模型文件（对应 @rt/core 的 AsrModelFile）。
 struct AsrModelFile {
   /// 远程下载地址（URLSession 会自动跟随 GitHub/HF 重定向）。
   let url: String
@@ -94,7 +94,7 @@ if (process.argv.includes('--check')) {
   if (current !== out) {
     console.error(
       `[gen:models] ${path.relative(repoRoot, outPath)} 已过期，请运行 ` +
-        '`pnpm --filter @mt/ios gen:models` 并提交。',
+        '`pnpm --filter @rt/ios gen:models` 并提交。',
     );
     process.exit(1);
   }

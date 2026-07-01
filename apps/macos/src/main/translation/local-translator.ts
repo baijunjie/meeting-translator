@@ -1,7 +1,7 @@
 // 本地翻译通用实现：Transformers.js 跑 seq2seq 翻译模型（onnxruntime-node，纯本地，Node 专用）。
 // 模型的差异全部收敛到「LocalModelSpec」这份数据里——新增本地模型只需加一份 spec，
 // 翻译流程（懒加载 / 缓存判定 / 语言码映射 / 简繁脚本回退）完全通用，做到优雅插拔。
-// 模型规格 / 语言映射 / 简繁归一化是平台无关的，已下沉到 @mt/core，这里只保留依赖原生模块的执行层。
+// 模型规格 / 语言映射 / 简繁归一化是平台无关的，已下沉到 @rt/core，这里只保留依赖原生模块的执行层。
 import fs from 'node:fs';
 import path from 'node:path';
 import { pipeline, env } from '@huggingface/transformers';
@@ -10,7 +10,7 @@ import {
   type LocalModelSpec,
   type Translator,
   type TranslateProgress,
-} from '@mt/core';
+} from '@rt/core';
 import type { LocalEngine } from '../../shared/types';
 
 // 新增本地模型只需在此加一份 spec（许可需为可自由分发，如 MIT/Apache）。

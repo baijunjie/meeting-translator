@@ -1,9 +1,9 @@
 // 对话归档的本地持久化：存到 electron userData/archives.json。
-// 纯逻辑（摘要 / id 生成 / 排序）已下沉到 @mt/core，这里只做 macOS 的 fs 读写。
+// 纯逻辑（摘要 / id 生成 / 排序）已下沉到 @rt/core，这里只做 macOS 的 fs 读写。
 import fs from 'node:fs';
 import path from 'node:path';
 import { app } from 'electron';
-import { listSummaries, makeArchiveId } from '@mt/core';
+import { listSummaries, makeArchiveId } from '@rt/core';
 import type { ArchiveLine, ArchiveRecord, ArchiveSummary } from '../shared/types';
 
 let cached: ArchiveRecord[] | null = null;

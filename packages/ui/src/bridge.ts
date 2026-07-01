@@ -1,4 +1,4 @@
-import type { AppBridge } from '@mt/core';
+import type { AppBridge } from '@rt/core';
 
 // 渲染层与宿主平台之间的桥接：由 mountApp 在挂载前通过 setBridge 注入具体实现
 // （macOS 下由 createMacBridge 包装 window.api，iOS Capacitor 下为各自的实现），

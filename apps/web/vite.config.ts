@@ -4,10 +4,10 @@ import tailwindcss from '@tailwindcss/vite';
 import { VitePWA } from 'vite-plugin-pwa';
 
 // 以 index.html 为入口构建浏览器 PWA 产物到 dist/。
-// @mt/ui 与 @mt/core 以 TS 源码消费，Vite 会把它们一起打进 bundle。
+// @rt/ui 与 @rt/core 以 TS 源码消费，Vite 会把它们一起打进 bundle。
 //
 // base：默认 '/'，部署到 GitHub Pages（子路径）时用 BASE_PATH 注入，例如
-//   BASE_PATH=/meeting-translator/ pnpm --filter @mt/web build
+//   BASE_PATH=/realtime-translator/ pnpm --filter @rt/web build
 const base = process.env.BASE_PATH || '/';
 
 export default defineConfig({
@@ -20,9 +20,9 @@ export default defineConfig({
       registerType: 'autoUpdate',
       includeAssets: ['favicon.svg', 'apple-touch-icon.png'],
       manifest: {
-        name: 'Meeting Translator',
-        short_name: 'Meeting',
-        description: 'Local real-time meeting transcription and translation in your browser',
+        name: 'Realtime Translator',
+        short_name: 'Realtime',
+        description: 'Local, real-time speech transcription and translation in your browser',
         // 浅色应用底色；主题色用品牌粉（与 macOS/iOS 一致）。
         background_color: '#ffffff',
         theme_color: '#FF5C7E',

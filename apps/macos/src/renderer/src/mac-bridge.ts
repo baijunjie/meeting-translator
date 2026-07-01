@@ -1,12 +1,12 @@
 // macOS（Electron 渲染层）平台桥接：把 preload 暴露的 window.api（ElectronApi）包装成
-// @mt/ui 依赖的平台无关 AppBridge。音频采集（getUserMedia + AudioContext + AudioWorklet）
-// 在这里完成——@mt/ui 不再感知浏览器采集细节。
+// @rt/ui 依赖的平台无关 AppBridge。音频采集（getUserMedia + AudioContext + AudioWorklet）
+// 在这里完成——@rt/ui 不再感知浏览器采集细节。
 //
 // startPipeline：先启动 ASR 子进程（api.startPipeline），就绪后开始采集并经 api.sendAudio 送 PCM。
 // stopPipeline：先停采集（停轨 + 关闭 AudioContext），再停 ASR 子进程（api.stopPipeline）。
 // 其余方法全部直通 window.api。
 
-import type { AppBridge } from '@mt/core';
+import type { AppBridge } from '@rt/core';
 import type { ElectronApi } from '@shared/types';
 
 export function createMacBridge(api: ElectronApi): AppBridge {

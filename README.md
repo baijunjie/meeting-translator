@@ -1,10 +1,10 @@
-# Meeting Translator
+# Realtime Translator
 
-> Local, real-time meeting transcription & translation for macOS, iOS, and the browser — audio and text stay on-device (cloud translation optional).
+> Local, real-time speech transcription & translation for macOS, iOS, and the browser — audio and text stay on-device (cloud translation optional).
 
 **English** · [简体中文](README.zh-CN.md) · [日本語](README.ja.md) · [한국어](README.ko.md)
 
-Try it now in your browser: **https://baijunjie.github.io/meeting-translator/**
+Try it now in your browser: **https://baijunjie.github.io/realtime-translator/**
 
 ## Features
 
@@ -29,13 +29,13 @@ Before requesting the microphone, the app first explains what it's used for; the
 
 ## Project structure
 
-A **pnpm-workspace monorepo** — shared logic/UI, one package per platform. All three platforms render the **same `@mt/ui`** and differ only in the injected `AppBridge`:
+A **pnpm-workspace monorepo** — shared logic/UI, one package per platform. All three platforms render the **same `@rt/ui`** and differ only in the injected `AppBridge`:
 
-- `packages/core` (`@mt/core`) — platform-agnostic TypeScript: domain types, settings/archive logic, translation (`Translator` + cloud + Simplified/Traditional conversion), the ASR model registry, and the platform-capability bridge interface (`AppBridge`).
-- `packages/ui` (`@mt/ui`) — shared Vue 3 UI; reaches the platform only through an injected `AppBridge` (no `window.api`).
-- `apps/macos` (`@mt/macos`) — the Electron app; implements `AppBridge` (audio capture, ASR + translation each in their own utilityProcess worker, fs storage) and hosts `@mt/ui`.
-- `apps/ios` (`@mt/ios`) — a Capacitor app, fully functional: a native plugin runs sherpa-onnx on device for ASR (via the iOS xcframework), and on-device translation uses Apple's Translation framework (iOS 18+). See `apps/ios/native-plugin/INTEGRATION.md`.
-- `apps/web` (`@mt/web`) — an installable browser **PWA**; runs sherpa-onnx as single-threaded WebAssembly in a Web Worker for ASR, and M2M100 via Transformers.js in a Web Worker for local translation. Storage via IndexedDB. Live at https://baijunjie.github.io/meeting-translator/.
+- `packages/core` (`@rt/core`) — platform-agnostic TypeScript: domain types, settings/archive logic, translation (`Translator` + cloud + Simplified/Traditional conversion), the ASR model registry, and the platform-capability bridge interface (`AppBridge`).
+- `packages/ui` (`@rt/ui`) — shared Vue 3 UI; reaches the platform only through an injected `AppBridge` (no `window.api`).
+- `apps/macos` (`@rt/macos`) — the Electron app; implements `AppBridge` (audio capture, ASR + translation each in their own utilityProcess worker, fs storage) and hosts `@rt/ui`.
+- `apps/ios` (`@rt/ios`) — a Capacitor app, fully functional: a native plugin runs sherpa-onnx on device for ASR (via the iOS xcframework), and on-device translation uses Apple's Translation framework (iOS 18+). See `apps/ios/native-plugin/INTEGRATION.md`.
+- `apps/web` (`@rt/web`) — an installable browser **PWA**; runs sherpa-onnx as single-threaded WebAssembly in a Web Worker for ASR, and M2M100 via Transformers.js in a Web Worker for local translation. Storage via IndexedDB. Live at https://baijunjie.github.io/realtime-translator/.
 - `assets/` — shared brand source (`icon.svg` / `icon.png`); each app generates its own icon format from it.
 
 ## Development
@@ -44,15 +44,15 @@ Requires **pnpm**. Vite + Vue 3 + Naive UI, all TypeScript (macOS uses electron-
 
 ```bash
 pnpm install
-pnpm dev                    # run the macOS app with hot reload (→ @mt/macos)
-pnpm --filter @mt/web dev   # run the browser PWA dev server (→ @mt/web)
+pnpm dev                    # run the macOS app with hot reload (→ @rt/macos)
+pnpm --filter @rt/web dev   # run the browser PWA dev server (→ @rt/web)
 ```
 
 For iOS, see `apps/ios/native-plugin/INTEGRATION.md` (the native plugin must be wired into a Capacitor iOS host; it needs the Xcode toolchain and a real device for the Translation framework).
 
 On macOS/web, the app downloads the ASR models itself on first launch (a setup screen); local translation downloads on first use (web) / first use (macOS).
 
-Other scripts: `pnpm build`, `pnpm type-check`. Per-package: `pnpm --filter @mt/macos <script>` (e.g. `clean`, `test-translate`).
+Other scripts: `pnpm build`, `pnpm type-check`. Per-package: `pnpm --filter @rt/macos <script>` (e.g. `clean`, `test-translate`).
 
 ### Packaging (macOS)
 
@@ -65,15 +65,15 @@ The packaged app is currently **unsigned** — to open it, right-click → Open 
 
 ### Web (PWA)
 
-Live at **https://baijunjie.github.io/meeting-translator/** — installable, and works offline after the first load (models and app shell are cached).
+Live at **https://baijunjie.github.io/realtime-translator/** — installable, and works offline after the first load (models and app shell are cached).
 
 - ASR runs sherpa-onnx as **single-threaded WebAssembly** in a Web Worker — no COOP/COEP headers needed, so it can be hosted for free on GitHub Pages.
 - Models are fetched from CDN on first use (SenseVoice from HuggingFace; Silero VAD is bundled same-origin because GitHub Releases lacks CORS) and cached in Cache Storage; settings/archives live in IndexedDB.
 - Deployed by a GitHub Actions workflow (`.github/workflows/deploy-web.yml`) on every push to `main`.
 
 ```bash
-pnpm --filter @mt/web dev      # dev server
-pnpm --filter @mt/web build    # production build → apps/web/dist
+pnpm --filter @rt/web dev      # dev server
+pnpm --filter @rt/web build    # production build → apps/web/dist
 ```
 
 ### Offline testing (no GUI)
@@ -87,7 +87,7 @@ npm run test-translate              # multi-direction translation (downloads mod
 
 ## Models
 
-The same ASR models (Silero VAD + SenseVoice int8) run on every platform; only the runtime differs (native N-API on macOS, the iOS xcframework, single-threaded WASM on web). They download on first run from the `@mt/core` registry.
+The same ASR models (Silero VAD + SenseVoice int8) run on every platform; only the runtime differs (native N-API on macOS, the iOS xcframework, single-threaded WASM on web). They download on first run from the `@rt/core` registry.
 
 | Model | Purpose | Size | How |
 |---|---|---|---|
@@ -99,7 +99,7 @@ iOS does **not** download M2M100 — it uses Apple's on-device translation inste
 
 ## Architecture
 
-All three platforms share `@mt/core` + `@mt/ui` and differ only in the `AppBridge` implementation. The same ASR models run everywhere, on a per-platform runtime — **macOS** = sherpa-onnx-node (native N-API), **iOS** = sherpa-onnx xcframework (native C++), **web** = sherpa-onnx single-threaded WASM. Local translation is also per-platform — **macOS / web** = M2M100 via Transformers.js (onnxruntime-node / onnxruntime-web), **iOS** = Apple's Translation framework. Cloud (any OpenAI-compatible endpoint) is available on all three.
+All three platforms share `@rt/core` + `@rt/ui` and differ only in the `AppBridge` implementation. The same ASR models run everywhere, on a per-platform runtime — **macOS** = sherpa-onnx-node (native N-API), **iOS** = sherpa-onnx xcframework (native C++), **web** = sherpa-onnx single-threaded WASM. Local translation is also per-platform — **macOS / web** = M2M100 via Transformers.js (onnxruntime-node / onnxruntime-web), **iOS** = Apple's Translation framework. Cloud (any OpenAI-compatible endpoint) is available on all three.
 
 The macOS process layout (iOS and web differ — native plugin / WASM workers respectively, not Electron processes):
 
@@ -126,4 +126,4 @@ flowchart LR
 
 On macOS, ASR and translation each run in their own Electron `utilityProcess`, so heavy native inference never blocks the UI — and a native crash (or oversized allocation) is isolated to that process instead of taking down the app. On web the equivalent isolation is a Web Worker per task; on iOS the work happens in the native plugin.
 
-Transcription uses [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) (ONNX Runtime); local translation uses [Transformers.js](https://github.com/huggingface/transformers.js) running Meta M2M100-418M (MIT) on macOS and web. Translation sits behind the `Translator` interface in `@mt/core` (one spec per model) — swapping in another local model, Apple's framework, or a cloud API is just another implementation.
+Transcription uses [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) (ONNX Runtime); local translation uses [Transformers.js](https://github.com/huggingface/transformers.js) running Meta M2M100-418M (MIT) on macOS and web. Translation sits behind the `Translator` interface in `@rt/core` (one spec per model) — swapping in another local model, Apple's framework, or a cloud API is just another implementation.

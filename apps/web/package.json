@@ -1,7 +1,7 @@
 {
-  "name": "@mt/web",
+  "name": "@rt/web",
   "version": "0.1.0-beta.1",
-  "description": "Meeting Translator — installable browser PWA hosting @mt/ui",
+  "description": "Realtime Translator — installable browser PWA hosting @rt/ui",
   "private": true,
   "type": "module",
   "scripts": {
@@ -13,8 +13,8 @@
   },
   "dependencies": {
     "@huggingface/transformers": "^4.2.0",
-    "@mt/core": "workspace:*",
-    "@mt/ui": "workspace:*",
+    "@rt/core": "workspace:*",
+    "@rt/ui": "workspace:*",
     "idb": "^8.0.0"
   },
   "devDependencies": {

@@ -1,7 +1,7 @@
 // macOS 打包：解决 pnpm workspace 下 electron-builder 找不到 node_modules 的问题。
 // 流程：electron-vite 构建 → pnpm deploy 导出自包含副本（带真实 node_modules + out/）
 // → 在副本里跑 electron-builder → 产物回写到 apps/macos/release。
-// 不签名构建：CSC_IDENTITY_AUTO_DISCOVERY=false pnpm --filter @mt/macos dist
+// 不签名构建：CSC_IDENTITY_AUTO_DISCOVERY=false pnpm --filter @rt/macos dist
 import { execSync } from 'node:child_process';
 import { rmSync } from 'node:fs';
 import path from 'node:path';
@@ -24,7 +24,7 @@ run('pnpm run icons', appDir);
 console.log('▶ 3/4 导出自包含副本 (pnpm deploy)');
 rmSync(deployDir, { recursive: true, force: true });
 // --prod=false 以带上 electron / electron-builder（构建期需要）；electron-builder 只把生产依赖打进 .app
-run(`pnpm --filter @mt/macos deploy --prod=false --legacy "${deployDir}"`, root);
+run(`pnpm --filter @rt/macos deploy --prod=false --legacy "${deployDir}"`, root);
 
 console.log('▶ 4/4 打包 (electron-builder)');
 const target = dirOnly ? '--dir' : '';

@@ -1,6 +1,6 @@
 // ASR 模型存取（浏览器端）。
 //
-// 职责：把 @mt/core 的 ASR_MODELS（Silero VAD + SenseVoice tokens/model.int8.onnx，合计 ~230MB）
+// 职责：把 @rt/core 的 ASR_MODELS（Silero VAD + SenseVoice tokens/model.int8.onnx，合计 ~230MB）
 // 从 HuggingFace / GitHub Release 拉下来，缓存进 Cache Storage（首次下载后离线可复用），
 // 并以「已下载字节 / 总字节」的形式回吐聚合进度（透传给 bridge 的 setupProgressCb）。
 //
@@ -11,7 +11,7 @@
 // 注意：模型文件本身**绝不**进仓库，只在运行时按需下载 + 缓存。WASM 侧（worker）拿到这里
 // 解出的 ArrayBuffer 后，再 Module.FS.writeFile 进 MEMFS 给 sherpa 用。
 
-import { ASR_MODEL_FILES, requiredAsrFiles, type AsrModelFile } from '@mt/core';
+import { ASR_MODEL_FILES, requiredAsrFiles, type AsrModelFile } from '@rt/core';
 
 /** Cache Storage 里存放 ASR 模型的缓存名。 */
 const CACHE_NAME = 'mt-asr-models-v1';
@@ -23,12 +23,12 @@ const SAME_ORIGIN_BUNDLED: Record<string, string> = {
   'silero_vad.onnx': `${import.meta.env.BASE_URL}models/silero_vad.onnx`,
 };
 
-/** 解析浏览器实际可 fetch 的地址：同源托管的优先，否则用 @mt/core 的远程 URL。 */
+/** 解析浏览器实际可 fetch 的地址：同源托管的优先，否则用 @rt/core 的远程 URL。 */
 function resolveUrl(file: AsrModelFile): string {
   return SAME_ORIGIN_BUNDLED[file.filename] ?? file.url;
 }
 
-/** 聚合下载进度（与 @mt/core SetupProgress 同形）。 */
+/** 聚合下载进度（与 @rt/core SetupProgress 同形）。 */
 export interface DownloadProgress {
   /** 已下载字节（已缓存命中的文件按其声明大小计入） */
   loaded: number;
@@ -131,7 +131,7 @@ export async function readCachedModels(): Promise<Map<string, Uint8Array>> {
   return out;
 }
 
-/** 已缓存文件的相对路径清单（与 @mt/core requiredAsrFiles 对齐，调试用）。 */
+/** 已缓存文件的相对路径清单（与 @rt/core requiredAsrFiles 对齐，调试用）。 */
 export function modelFileList(): string[] {
   return requiredAsrFiles();
 }

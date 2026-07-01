@@ -2,7 +2,7 @@
 
 浏览器端 Silero VAD + SenseVoice 识别用的 WASM 产物。运行时由 `src/asr/sherpa-worker.ts`
 在 Web Worker 里 `importScripts` 加载;模型(silero_vad.onnx / model.int8.onnx / tokens.txt)
-**不在这里**,由 `src/asr/model-store.ts` 运行时从 HuggingFace（`@mt/core` 的 `ASR_MODELS`）
+**不在这里**,由 `src/asr/model-store.ts` 运行时从 HuggingFace（`@rt/core` 的 `ASR_MODELS`）
 拉取并缓存进 Cache Storage,再写入 WASM 文件系统。
 
 文件:

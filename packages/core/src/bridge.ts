@@ -1,6 +1,6 @@
 // 平台无关的 UI ←→ 平台桥接契约。
-// 渲染层（@mt/ui）只依赖此接口，由各宿主（Electron 渲染层 / iOS Capacitor 等）注入实现。
-// 仅引用 @mt/core 内的领域类型与回调，保持平台无关；音频采集不在此契约内（隐藏在各宿主实现中）。
+// 渲染层（@rt/ui）只依赖此接口，由各宿主（Electron 渲染层 / iOS Capacitor 等）注入实现。
+// 仅引用 @rt/core 内的领域类型与回调，保持平台无关；音频采集不在此契约内（隐藏在各宿主实现中）。
 
 import type {
   SegmentPayload,
@@ -19,7 +19,7 @@ import type {
 } from './types';
 
 /**
- * 宿主提供给渲染层（@mt/ui）的平台桥接契约，由各宿主实现并注入。
+ * 宿主提供给渲染层（@rt/ui）的平台桥接契约，由各宿主实现并注入。
  * UI 只负责开/停会话与接收事件，音频采集隐藏在桥接背后、按平台实现：
  *  - macOS（Electron）：渲染层 createMacBridge 用 getUserMedia/AudioWorklet 采集，经 IPC 送音频。
  *  - iOS（Capacitor）：原生插件直接采麦，JS 侧无需送音频。

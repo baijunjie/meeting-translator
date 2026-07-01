@@ -1,5 +1,5 @@
-appId: io.github.baijunjie.meetingtranslator
-productName: Meeting Translator
+appId: io.github.baijunjie.realtimetranslator
+productName: Realtime Translator
 directories:
   output: release
   buildResources: build
@@ -27,7 +27,7 @@ mac:
   entitlements: build/entitlements.mac.plist
   entitlementsInherit: build/entitlements.mac.plist
   extendInfo:
-    NSMicrophoneUsageDescription: 用于实时识别与翻译会议语音（音频仅在本机处理，不上传）
+    NSMicrophoneUsageDescription: 用于实时识别与翻译语音（音频仅在本机处理，不上传）
   target:
     - target: dmg
       arch: [arm64]

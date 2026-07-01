@@ -1,16 +1,16 @@
-// 浏览器 PWA 平台桥接：实现 @mt/core 的 AppBridge，注入给 @mt/ui。
+// 浏览器 PWA 平台桥接：实现 @rt/core 的 AppBridge，注入给 @rt/ui。
 // 镜像 apps/ios/src/bridge.ts 的结构，但全部用浏览器原生能力：
 //
 // 各能力来源：
-//  - 设置 / 归档持久化：IndexedDB（idb 库），纯逻辑复用 @mt/core
+//  - 设置 / 归档持久化：IndexedDB（idb 库），纯逻辑复用 @rt/core
 //    （makeDefaults / withDefaults / listSummaries / makeArchiveId / toSummary）。
 //  - 翻译：segment 到达且开启翻译时翻成母语，两种引擎与 macOS 对齐：
-//    · engine==='cloud'  → @mt/core CloudTranslator（fetch OpenAI 兼容端点）。
+//    · engine==='cloud'  → @rt/core CloudTranslator（fetch OpenAI 兼容端点）。
 //    · 否则（本地 m2m100）→ Transformers.js（Xenova/m2m100_418M，浏览器内 WASM），见 ./translation。
 //    繁體等目标脚本后处理沿用 M2M100_SPEC.toScript（两条路径一致）。
 //  - 麦克风权限：navigator.permissions.query；openMicSettings 浏览器无法打开系统设置，空实现。
 //  - ASR：Phase 2 真识别。getUserMedia + AudioWorklet 采麦（见 ./asr/web-asr），帧送进经典 Web Worker
-//    (./asr/sherpa-worker) 跑 sherpa-onnx WASM（Silero VAD + SenseVoice）。模型从 @mt/core ASR_MODELS
+//    (./asr/sherpa-worker) 跑 sherpa-onnx WASM（Silero VAD + SenseVoice）。模型从 @rt/core ASR_MODELS
 //    下载并缓存在 Cache Storage（见 ./asr/model-store），写入 WASM FS 后识别。单线程 WASM，无需 COOP/COEP。
 //
 // 全部能力均已实现（可在此环境验证类型 + 打包）：设置、归档、云 + 本地翻译、事件转发、回调注册、
@@ -24,7 +24,7 @@ import {
   makeArchiveId,
   CloudTranslator,
   M2M100_SPEC,
-} from '@mt/core';
+} from '@rt/core';
 import type {
   AppBridge,
   AppSettings,
@@ -40,7 +40,7 @@ import type {
   TranslationPayload,
   StatusPayload,
   TranslationStatusPayload,
-} from '@mt/core';
+} from '@rt/core';
 import { WebAsr } from './asr/web-asr';
 import { areModelsCached, ensureModelsCached } from './asr/model-store';
 import { WebLocalTranslator, type ModelProgress } from './translation/web-local-translator';
@@ -183,7 +183,7 @@ export function createWebBridge(): AppBridge {
     },
   });
 
-  // ---- MicPermission 归一化（Permissions API 的字符串 → @mt/core 联合类型） ----
+  // ---- MicPermission 归一化（Permissions API 的字符串 → @rt/core 联合类型） ----
   // 浏览器只有 granted/denied/prompt；prompt 对应「尚未决定」。
   function asMicPermission(state: PermissionState): MicPermission {
     if (state === 'granted') return 'granted';
@@ -239,7 +239,7 @@ export function createWebBridge(): AppBridge {
 
     // ===== 首次安装 / 模型下载（Phase 2） =====
     async getSetupStatus(): Promise<SetupStatus> {
-      // 检查 Cache Storage 里 sherpa-onnx 模型（@mt/core requiredAsrFiles）是否齐全。
+      // 检查 Cache Storage 里 sherpa-onnx 模型（@rt/core requiredAsrFiles）是否齐全。
       // 齐全则直接落主界面；否则 UI 显示 SetupScreen 触发 downloadAsrModels。
       try {
         return { asrReady: await areModelsCached() };
@@ -248,7 +248,7 @@ export function createWebBridge(): AppBridge {
       }
     },
     async downloadAsrModels(): Promise<{ ok: boolean; error?: string }> {
-      // 按 @mt/core ASR_MODELS 下载 Silero VAD + SenseVoice（~230MB）到 Cache Storage，
+      // 按 @rt/core ASR_MODELS 下载 Silero VAD + SenseVoice（~230MB）到 Cache Storage，
       // 边下边通过 setupProgressCb 回吐 { loaded, total } 聚合进度。首次后命中缓存即秒回。
       try {
         await ensureModelsCached((p) => setupProgressCb?.({ loaded: p.loaded, total: p.total }));

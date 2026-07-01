@@ -2,7 +2,7 @@
 // （相对 models 目录）与近似大小。纯数据/类型，**不含** Node 的 fs/fetch——
 // 各端（macOS Electron 主进程、iOS 原生下载器）共用这里的常量，自行实现下载/校验逻辑。
 //
-// iOS 注意：iOS 的原生模型下载器应消费同一份 @mt/core 登记表（ASR_MODELS /
+// iOS 注意：iOS 的原生模型下载器应消费同一份 @rt/core 登记表（ASR_MODELS /
 // requiredAsrFiles），不要再各端硬编码 URL/文件名/目录，避免与 macOS 漂移。
 //
 // 翻译模型（Xenova/m2m100_418M）的规格见 ./translation/local-spec.ts。

@@ -7,16 +7,16 @@
 //  - 采麦：getUserMedia + AudioContext(16k) + AudioWorklet（见 ./pcm-worklet.ts），每 100ms 一帧。
 //  - 识别：放在经典 Web Worker（./sherpa-worker.ts，importScripts 加载 Emscripten 胶水）里跑，
 //    主线程只负责把帧 postMessage 过去，避免 WASM 解码阻塞 UI。
-//  - 模型：start 前确保 @mt/core ASR_MODELS 已下载并缓存（Cache Storage），再把字节传给 Worker
+//  - 模型：start 前确保 @rt/core ASR_MODELS 已下载并缓存（Cache Storage），再把字节传给 Worker
 //    写入 WASM FS（见 ./model-store.ts）。
-//  - 回吐：Worker 的 partial/segment 消息转成 @mt/core 的 PartialPayload/SegmentPayload，
+//  - 回吐：Worker 的 partial/segment 消息转成 @rt/core 的 PartialPayload/SegmentPayload，
 //    经 onPartial/onSegment 回调上抛。
 
-import type { SegmentPayload, PartialPayload, StatusPayload } from '@mt/core';
+import type { SegmentPayload, PartialPayload, StatusPayload } from '@rt/core';
 import { areModelsCached, ensureModelsCached, readCachedModels } from './model-store';
 import type { ToWorker, FromWorker } from './worker-protocol';
 
-// sherpa-onnx / SenseVoice 期望的采样率（与 @mt/core 模型一致）。
+// sherpa-onnx / SenseVoice 期望的采样率（与 @rt/core 模型一致）。
 const SAMPLE_RATE = 16000;
 
 export interface WebAsrCallbacks {
@@ -58,7 +58,7 @@ export class WebAsr {
 
   /** sherpa 静态资源（胶水 + .wasm + 包装器）所在的基址（public/sherpa/，受 Vite base 影响）。 */
   private sherpaBaseUrl(): string {
-    // import.meta.env.BASE_URL 形如 '/' 或 '/meeting-translator/'。
+    // import.meta.env.BASE_URL 形如 '/' 或 '/realtime-translator/'。
     const base = (import.meta as { env?: { BASE_URL?: string } }).env?.BASE_URL ?? '/';
     return new URL(`${base}sherpa/`, self.location.origin).toString();
   }

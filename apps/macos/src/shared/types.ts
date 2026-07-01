@@ -1,5 +1,5 @@
 // 主进程与渲染进程之间通过 IPC 传递的数据结构，以及暴露给渲染进程的 API。
-// 平台无关的领域类型已下沉到 @mt/core，这里再导出以保持既有 import 路径不变；
+// 平台无关的领域类型已下沉到 @rt/core，这里再导出以保持既有 import 路径不变；
 // 本文件只保留 Electron 进程相关的 IPC 契约与 preload API。
 
 import type {
@@ -8,11 +8,11 @@ import type {
   TranslationStatusPayload,
   TranslationEngine,
   CloudTranslationConfig,
-} from '@mt/core';
+} from '@rt/core';
 
 // 重新导出领域类型与桥接契约，使 apps/macos 内既有的 `from '../shared/types'` / `@shared/types` 继续可用。
-// AppBridge 已下沉到 @mt/core（packages/core/src/bridge.ts），这里转出以保持 preload/main 的导入路径不变。
-import type { AppBridge } from '@mt/core';
+// AppBridge 已下沉到 @rt/core（packages/core/src/bridge.ts），这里转出以保持 preload/main 的导入路径不变。
+import type { AppBridge } from '@rt/core';
 
 export type {
   SegmentPayload,
@@ -36,12 +36,12 @@ export type {
   ArchiveSummary,
   AppSettings,
   AppBridge,
-} from '@mt/core';
+} from '@rt/core';
 
 // Electron preload 暴露给渲染层的 window.api 的实际形状：在平台无关的 AppBridge 之上，
 // 额外保留 sendAudio（IPC 送 PCM）。注意：这里的 startPipeline/stopPipeline 是“ASR 子进程
 // 的启停”（不含音频采集）——渲染层的 createMacBridge 在其外再叠加 getUserMedia/AudioWorklet 采集，
-// 对 @mt/ui 呈现为完整会话的 AppBridge。
+// 对 @rt/ui 呈现为完整会话的 AppBridge。
 export type ElectronApi = AppBridge & {
   /** 渲染层采集到的 PCM 帧经 IPC 送往主进程/ASR 子进程 */
   sendAudio(samples: Float32Array): void;

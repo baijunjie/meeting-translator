@@ -30,7 +30,7 @@ function buildWithMicroGaps(files: string[]): Float32Array {
   return Float32Array.from(out);
 }
 
-const audio = buildWithMicroGaps(['meeting.wav', 'meeting-ja-zh.wav']);
+const audio = buildWithMicroGaps(['sample.wav', 'sample-ja-zh.wav']);
 console.log('含词间小停顿的连续语音:', (audio.length / SAMPLE_RATE).toFixed(1) + 's');
 
 let count = 0;

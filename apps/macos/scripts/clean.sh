@@ -12,7 +12,7 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-SETTINGS_FILE="$HOME/Library/Application Support/meeting-translator/settings.json"
+SETTINGS_FILE="$HOME/Library/Application Support/realtime-translator/settings.json"
 
 rm -rf out release dist-test node_modules/.vite ../../.deploy-macos
 echo "✓ 已清理构建产物与缓存：out/  release/  dist-test/  node_modules/.vite  .deploy-macos/"

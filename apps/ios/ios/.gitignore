@@ -5,7 +5,7 @@ App/App/public
 DerivedData
 xcuserdata
 
-# sherpa-onnx / onnxruntime xcframeworks（~179MB）：不入库，由 `pnpm --filter @mt/ios fetch:frameworks` 下载
+# sherpa-onnx / onnxruntime xcframeworks（~179MB）：不入库，由 `pnpm --filter @rt/ios fetch:frameworks` 下载
 App/Frameworks
 
 # Cordova plugins for Capacitor

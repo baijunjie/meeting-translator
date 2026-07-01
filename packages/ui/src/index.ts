@@ -1,7 +1,7 @@
-// @mt/ui 公共出口：平台无关的 Vue 渲染层。
+// @rt/ui 公共出口：平台无关的 Vue 渲染层。
 // 各宿主（macOS Electron / iOS Capacitor）通过 mountApp 注入桥接实现并挂载同一套 UI。
 import { createApp } from 'vue';
-import type { AppBridge } from '@mt/core';
+import type { AppBridge } from '@rt/core';
 import App from './App.vue';
 import { i18n } from './i18n';
 import { setBridge } from './bridge';

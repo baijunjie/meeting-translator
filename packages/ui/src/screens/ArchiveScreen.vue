@@ -3,7 +3,7 @@ import { ref, onMounted } from 'vue';
 import { NButton } from 'naive-ui';
 import { ArrowLeft, Trash2 } from '@lucide/vue';
 import { useI18n } from 'vue-i18n';
-import type { ArchiveSummary, ArchiveRecord } from '@mt/core';
+import type { ArchiveSummary, ArchiveRecord } from '@rt/core';
 import ConversationLine from '../components/ConversationLine.vue';
 import ScrollArea from '../components/ScrollArea.vue';
 import { fmtDateTime } from '../utils/datetime';

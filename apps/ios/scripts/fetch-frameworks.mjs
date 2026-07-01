@@ -1,7 +1,7 @@
 // 下载 sherpa-onnx 的 iOS 预编译 xcframework（ASR + VAD 用），放到 ios/App/Frameworks/。
 // 这些二进制很大（~179MB），不入库——全新 clone 后跑一次本脚本即可构建 iOS app。
 //
-// 用法：pnpm --filter @mt/ios fetch:frameworks
+// 用法：pnpm --filter @rt/ios fetch:frameworks
 //
 // 版本必须与 native-plugin/ios/SherpaOnnx.swift + App-Bridging-Header.h 所基于的 tag 一致。
 // 升级版本时：改这里的 VERSION，并从同一 tag 重新 vendor 上述两个文件。

@@ -1,15 +1,15 @@
 {
-  "name": "meeting-translator-monorepo",
+  "name": "realtime-translator-monorepo",
   "version": "0.1.0-beta.1",
-  "description": "Local real-time meeting transcription for macOS (monorepo)",
+  "description": "Local, real-time speech transcription & translation for macOS, iOS, and the browser (monorepo)",
   "private": true,
   "scripts": {
     "postinstall": "node node_modules/electron/install.js",
-    "dev": "pnpm --filter @mt/macos dev",
-    "build": "pnpm --filter @mt/macos build",
-    "type-check": "pnpm --filter @mt/macos type-check",
-    "dist": "pnpm --filter @mt/macos dist",
-    "dist:dir": "pnpm --filter @mt/macos dist:dir",
+    "dev": "pnpm --filter @rt/macos dev",
+    "build": "pnpm --filter @rt/macos build",
+    "type-check": "pnpm --filter @rt/macos type-check",
+    "dist": "pnpm --filter @rt/macos dist",
+    "dist:dir": "pnpm --filter @rt/macos dist:dir",
     "set-version": "node scripts/set-version.mjs"
   },
   "keywords": [],

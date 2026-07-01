@@ -1,6 +1,6 @@
 //
-//  MeetingAsrPlugin.swift
-//  Meeting Translator — iOS on-device ASR Capacitor plugin.
+//  RealtimeAsrPlugin.swift
+//  Realtime Translator — iOS on-device ASR Capacitor plugin.
 //
 //  On-device speech-to-text using sherpa-onnx (k2-fsa) v1.13.3:
 //    - Silero VAD segments speech from a 16 kHz mono Float32 mic stream.
@@ -27,11 +27,11 @@ import AVFoundation
 import UIKit
 import Capacitor
 
-@objc(MeetingAsrPlugin)
-public class MeetingAsrPlugin: CAPPlugin, CAPBridgedPlugin {
+@objc(RealtimeAsrPlugin)
+public class RealtimeAsrPlugin: CAPPlugin, CAPBridgedPlugin {
   // Capacitor 6+ 通过 CAPBridgedPlugin 发现插件（取代旧的 .m / CAP_PLUGIN 宏）
-  public let identifier = "MeetingAsrPlugin"
-  public let jsName = "MeetingAsr"
+  public let identifier = "RealtimeAsrPlugin"
+  public let jsName = "RealtimeAsr"
   public let pluginMethods: [CAPPluginMethod] = [
     CAPPluginMethod(name: "start", returnType: CAPPluginReturnPromise),
     CAPPluginMethod(name: "stop", returnType: CAPPluginReturnPromise),
@@ -63,7 +63,7 @@ public class MeetingAsrPlugin: CAPPlugin, CAPBridgedPlugin {
 
   private let audioEngine = AVAudioEngine()
   /// All recognizer + VAD work runs here, off the audio render thread.
-  private let asrQueue = DispatchQueue(label: "io.github.baijunjie.meetingtranslator.asr")
+  private let asrQueue = DispatchQueue(label: "io.github.baijunjie.realtimetranslator.asr")
 
   private var recognizer: SherpaOnnxOfflineRecognizer?
   private var vad: SherpaOnnxVoiceActivityDetectorWrapper?
@@ -428,7 +428,7 @@ public class MeetingAsrPlugin: CAPPlugin, CAPBridgedPlugin {
     }
   }
 
-  // MARK: - Models on disk (download-on-first-run; consumes @mt/core registry via AsrModels.swift)
+  // MARK: - Models on disk (download-on-first-run; consumes @rt/core registry via AsrModels.swift)
 
   /// Writable models root: Application Support/models (created on demand, excluded from iCloud backup).
   private func modelsDir() -> URL {
@@ -600,7 +600,7 @@ public class MeetingAsrPlugin: CAPPlugin, CAPBridgedPlugin {
   // MARK: - Helpers
 
   private func asrError(_ message: String) -> NSError {
-    return NSError(domain: "MeetingAsr", code: -1, userInfo: [NSLocalizedDescriptionKey: message])
+    return NSError(domain: "RealtimeAsr", code: -1, userInfo: [NSLocalizedDescriptionKey: message])
   }
 }
 

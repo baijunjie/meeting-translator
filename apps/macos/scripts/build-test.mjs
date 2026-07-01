@@ -1,5 +1,5 @@
 // 构建手动冒烟脚本（test/*.ts）为可直接 node 运行的 CJS 单文件。
-// 用 esbuild 把 @mt/core 的 TS 源码内联打进来（与生产构建一致：core 以源码消费、不外部化），
+// 用 esbuild 把 @rt/core 的 TS 源码内联打进来（与生产构建一致：core 以源码消费、不外部化），
 // 原生模块（onnxruntime / sherpa / transformers）保持 external（运行时 require）。
 import { build } from 'esbuild';
 import { fileURLToPath } from 'node:url';
@@ -25,7 +25,7 @@ await build({
   format: 'cjs',
   target: 'node22',
   // 原生模块保持外部化（运行时 require），与生产 main 构建一致。
-  // @mt/core / chinese-conv 等纯 JS 依赖会被打进产物，使单文件可直接 node 运行。
+  // @rt/core / chinese-conv 等纯 JS 依赖会被打进产物，使单文件可直接 node 运行。
   external: ['@huggingface/transformers', 'onnxruntime-node', 'sherpa-onnx-node'],
   logLevel: 'info',
 });

@@ -1,7 +1,7 @@
 import path from 'node:path';
 import fs from 'node:fs';
 import { Vad, OfflineRecognizer } from 'sherpa-onnx-node';
-import { SENSE_VOICE_DIR } from '@mt/core';
+import { SENSE_VOICE_DIR } from '@rt/core';
 import type { SegmentPayload, PartialPayload } from '../shared/types';
 
 export const SAMPLE_RATE = 16000;

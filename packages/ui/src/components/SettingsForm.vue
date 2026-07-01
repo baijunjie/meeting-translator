@@ -5,7 +5,7 @@ import type {
   ThemePref,
   CloudTranslationConfig,
   TranslationEngine,
-} from '@mt/core';
+} from '@rt/core';
 
 /** 设置表单的数据形状（设置页与首次引导向导共用） */
 export interface SettingsFormData {

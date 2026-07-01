@@ -1,7 +1,7 @@
 {
-  "name": "@mt/ios",
+  "name": "@rt/ios",
   "version": "0.1.0-beta.1",
-  "description": "Meeting Translator — iOS (Capacitor) app hosting @mt/ui in a WebView",
+  "description": "Realtime Translator — iOS (Capacitor) app hosting @rt/ui in a WebView",
   "private": true,
   "type": "module",
   "scripts": {
@@ -16,8 +16,8 @@
     "@capacitor/core": "^7.0.0",
     "@capacitor/ios": "^7.6.7",
     "@capacitor/preferences": "^7.0.0",
-    "@mt/core": "workspace:*",
-    "@mt/ui": "workspace:*"
+    "@rt/core": "workspace:*",
+    "@rt/ui": "workspace:*"
   },
   "devDependencies": {
     "@capacitor/cli": "^7.0.0",
