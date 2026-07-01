@@ -36,7 +36,9 @@ let translateChild: UtilityProcess | null = null;
 
 // 应用图标：仅开发时手动设置（dev 下 Dock 默认显示 Electron 图标）；
 // 打包后图标由 electron-builder 写入 .app，无需也无法从 asar 取此路径。
-const APP_ICON = path.join(app.getAppPath(), 'build', 'icon.png');
+// 图标源已唯一化到仓库根 assets/icon.png（见 scripts/gen-icon.mjs）；
+// getAppPath() 在 dev 下为 apps/macos，故上溯两级到仓库根取共享 PNG。
+const APP_ICON = path.join(app.getAppPath(), '..', '..', 'assets', 'icon.png');
 
 function createWindow(): void {
   win = new BrowserWindow({

@@ -18,7 +18,7 @@ export default defineConfig({
     VitePWA({
       // 自动注册并在新版本就绪后静默更新 Service Worker。
       registerType: 'autoUpdate',
-      includeAssets: ['favicon.svg', 'apple-touch-icon.png'],
+      includeAssets: ['favicon.png', 'apple-touch-icon.png'],
       manifest: {
         name: 'Realtime Translator',
         short_name: 'Realtime',
