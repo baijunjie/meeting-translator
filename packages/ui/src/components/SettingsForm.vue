@@ -34,7 +34,11 @@ import { previewLocale, previewTheme, applyFontSize } from '../composables/useSe
 
 const { t } = useI18n();
 // 父组件持有 reactive 表单对象，子组件直接通过 v-model 修改其字段
-const props = defineProps<{ form: SettingsFormData }>();
+const props = defineProps<{
+  form: SettingsFormData;
+  /** 是否要求「有改动」才允许保存：设置页传 true（没改动就禁用保存）；引导页省略（用默认也可开始）。 */
+  requireDirty?: boolean;
+}>();
 
 // 平台是否支持本地翻译引擎（Web 在 iOS 上为 false：WebKit 内存装不下本地模型）。
 // 不可用时仅从「翻译方式」下拉里去掉「本地」项（仍保留 无 / 云端）。iOS 上持久化的 engine
@@ -84,11 +88,31 @@ watch(
   },
 );
 
-// 保存门禁：选云端就必须「测试连接」通过才能保存（三项须先填齐才可点测试）。
-// 非云端（无 / 本地）恒可保存；平台不支持测试（macOS）时不阻断，沿用旧行为。
-// 想只用转写的用户可在「翻译方式」里选「无」，不会被云端门禁卡住。
+// 打开时的整表单快照，用于两处判断：
+//  · dirty：表单较打开时是否有任何改动（设置页据此禁用「保存」——没改动就无可保存）。
+//  · cloudUnchanged：云端配置（引擎 + 三项）是否与打开时一致——一致说明此前已保存/已验证，
+//    本次只改了语言等其它设置时不必重新测试连接。
+const initialJson = JSON.stringify(props.form);
+const initial = JSON.parse(initialJson) as SettingsFormData;
+const dirty = computed(() => JSON.stringify(props.form) !== initialJson);
+const cloudUnchanged = computed(
+  () =>
+    props.form.engine === initial.engine &&
+    props.form.cloud.baseURL === initial.cloud.baseURL &&
+    props.form.cloud.apiKey === initial.cloud.apiKey &&
+    props.form.cloud.model === initial.cloud.model,
+);
+// 云端视为已验证：本次测试通过，或配置与打开时一致（此前保存过、未改动）。
+const cloudVerified = computed(() => cloudTest.value === 'ok' || cloudUnchanged.value);
+
+// 云端门禁：非云端恒可；平台不支持测试（macOS）不阻断；云端须已验证（本次测通或未改动的旧配置）。
+const cloudOk = computed(
+  () => props.form.engine !== 'cloud' || !canTestCloud || cloudVerified.value,
+);
+// 保存门禁：云端门禁通过，且（当 requireDirty 时）表单确有改动才可保存。
+// 设置页 requireDirty=true → 没改动禁用「保存」；引导页省略 → 用默认也可「开始」。
 watchEffect(() => {
-  saveable.value = props.form.engine !== 'cloud' || !canTestCloud || cloudTest.value === 'ok';
+  saveable.value = cloudOk.value && (!props.requireDirty || dirty.value);
 });
 
 // 按语言 key 字母序排列
@@ -173,7 +197,7 @@ watch(() => props.form.fontSize, (v) => applyFontSize(v));
             class="text-xs font-medium text-red-600 dark:text-red-400"
           >{{ t('settings.testFail') }}</span>
           <span
-            v-else-if="cloudTest === 'idle' && cloudFilled"
+            v-else-if="cloudTest === 'idle' && cloudFilled && !cloudUnchanged"
             class="text-xs text-neutral-500 dark:text-neutral-400"
           >{{ t('settings.testHint') }}</span>
         </div>

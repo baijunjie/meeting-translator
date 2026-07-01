@@ -60,7 +60,7 @@ function cancel(): void {
 
     <div class="flex-1 overflow-y-auto">
       <div class="mx-auto w-full max-w-[560px] px-5 py-6">
-        <settings-form :form="form" v-model:saveable="saveable" />
+        <settings-form :form="form" require-dirty v-model:saveable="saveable" />
       </div>
     </div>
   </div>
