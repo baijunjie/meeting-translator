@@ -168,7 +168,7 @@ function openMicSettings(): void {
           :title="translationDownloading ? t('status.transDownloading') : t('status.transLoading')"
         >
           <LoaderCircle :size="14" class="animate-spin" />
-          <span>{{ t('main.translate') }}</span>
+          <span>{{ t('main.transPreparing') }}</span>
           <span v-if="translationDownloading">{{ translationProgress }}%</span>
         </span>
         <span
@@ -177,7 +177,7 @@ function openMicSettings(): void {
           :title="t('status.transFailed')"
         >
           <TriangleAlert :size="14" />
-          <span>{{ t('main.translate') }}</span>
+          <span>{{ t('main.transPreparing') }}</span>
         </span>
 
         <!-- NDropdown 无 disabled 属性：无内容时直接渲染禁用按钮，避免空状态仍能弹出菜单 -->

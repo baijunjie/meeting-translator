@@ -26,7 +26,7 @@ const messages = {
       themeDark: 'Dark',
       themeLight: 'Light',
       themeSystem: 'System',
-      translate: 'Translate',
+      transPreparing: 'Preparing translation',
       viewArchives: 'Archives',
     },
     mic: {
@@ -113,7 +113,7 @@ const messages = {
       themeDark: 'ダーク',
       themeLight: 'ライト',
       themeSystem: 'システムに合わせる',
-      translate: '翻訳',
+      transPreparing: '翻訳準備',
       viewArchives: 'アーカイブ',
     },
     mic: {
@@ -200,7 +200,7 @@ const messages = {
       themeDark: '다크',
       themeLight: '라이트',
       themeSystem: '시스템 설정',
-      translate: '번역',
+      transPreparing: '번역 준비',
       viewArchives: '보관 기록',
     },
     mic: {
@@ -285,7 +285,7 @@ const messages = {
       themeDark: '深色',
       themeLight: '浅色',
       themeSystem: '跟随系统',
-      translate: '翻译',
+      transPreparing: '准备翻译',
       viewArchives: '归档记录',
     },
     mic: {
@@ -370,7 +370,7 @@ const messages = {
       themeDark: '深色',
       themeLight: '淺色',
       themeSystem: '跟隨系統',
-      translate: '翻譯',
+      transPreparing: '準備翻譯',
       viewArchives: '封存記錄',
     },
     mic: {
