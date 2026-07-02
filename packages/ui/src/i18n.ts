@@ -49,7 +49,6 @@ const messages = {
     onboarding: {
       configure: 'Set up your preferences to get started',
       start: 'Get Started',
-      subtitle: 'Choose your language',
       title: 'Welcome to @:main.appTitle',
     },
     settings: {
@@ -95,11 +94,7 @@ const messages = {
       trTitle: 'Download translation model',
     },
     status: {
-      errorPrefix: 'Error: ',
       loadingModel: 'Loading speech model…',
-      ready: 'Ready',
-      recording: 'Recording',
-      stopped: 'Stopped',
       transDownloading: 'Downloading translation model…',
       transFailed: 'Failed to load translation model',
       transLoading: 'Loading translation model…',
@@ -152,7 +147,6 @@ const messages = {
     onboarding: {
       configure: '簡単な設定を行って始めましょう',
       start: '使ってみる',
-      subtitle: '言語を選択してください',
       title: "@:{'main.appTitle'}へようこそ",
     },
     settings: {
@@ -198,11 +192,7 @@ const messages = {
       trTitle: '翻訳モデルをダウンロード',
     },
     status: {
-      errorPrefix: 'エラー: ',
       loadingModel: '音声認識モデルを読み込み中…',
-      ready: '準備完了',
-      recording: '録音中',
-      stopped: '停止しました',
       transDownloading: '翻訳モデルをダウンロード中…',
       transFailed: '翻訳モデルの読み込みに失敗しました',
       transLoading: '翻訳モデルを読み込み中…',
@@ -255,7 +245,6 @@ const messages = {
     onboarding: {
       configure: '간단한 설정 후 시작하세요',
       start: '시작하기',
-      subtitle: '언어를 선택하세요',
       title: "@:{'main.appTitle'}에 오신 것을 환영합니다",
     },
     settings: {
@@ -299,11 +288,7 @@ const messages = {
       trTitle: '번역 모델 다운로드',
     },
     status: {
-      errorPrefix: '오류: ',
       loadingModel: '음성 인식 모델 로딩 중…',
-      ready: '준비됨',
-      recording: '녹음 중',
-      stopped: '중지됨',
       transDownloading: '번역 모델 다운로드 중…',
       transFailed: '번역 모델 로딩 실패',
       transLoading: '번역 모델 로딩 중…',
@@ -356,7 +341,6 @@ const messages = {
     onboarding: {
       configure: '简单配置后即可开始',
       start: '开始使用',
-      subtitle: '请选择你的语言',
       title: '欢迎使用 @:main.appTitle',
     },
     settings: {
@@ -398,11 +382,7 @@ const messages = {
       trTitle: '下载翻译模型',
     },
     status: {
-      errorPrefix: '出错: ',
       loadingModel: '识别模型加载中…',
-      ready: '就绪',
-      recording: '录音中',
-      stopped: '已停止',
       transDownloading: '翻译模型下载中…',
       transFailed: '翻译模型加载失败',
       transLoading: '翻译模型加载中…',
@@ -455,7 +435,6 @@ const messages = {
     onboarding: {
       configure: '簡單設定後即可開始',
       start: '開始使用',
-      subtitle: '請選擇你的語言',
       title: '歡迎使用 @:main.appTitle',
     },
     settings: {
@@ -497,11 +476,7 @@ const messages = {
       trTitle: '下載翻譯模型',
     },
     status: {
-      errorPrefix: '發生錯誤: ',
       loadingModel: '辨識模型載入中…',
-      ready: '就緒',
-      recording: '錄音中',
-      stopped: '已停止',
       transDownloading: '翻譯模型下載中…',
       transFailed: '翻譯模型載入失敗',
       transLoading: '翻譯模型載入中…',
