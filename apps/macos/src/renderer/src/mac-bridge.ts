@@ -53,6 +53,11 @@ export function createMacBridge(api: ElectronApi): AppBridge {
     },
 
     async stopPipeline() {
+      // 等在途启动先完成再拆除：保证「stop 晚于 start 调用」必然「stop 晚于 start 生效」，
+      // 不会在 beginCapture 取到麦克风前拆了个寂寞、留下持续采集的流。
+      if (starting) {
+        await starting.catch(() => undefined);
+      }
       if (mediaStream) {
         mediaStream.getTracks().forEach((tr) => tr.stop());
         mediaStream = null;

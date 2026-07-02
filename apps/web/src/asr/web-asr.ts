@@ -49,13 +49,11 @@ export class WebAsr {
   private workerFailed = false;
   private running = false;
 
-  // start/stop/prewarm 单飞互斥：把三类操作串到同一条链上，避免并发 start 泄漏双 Worker/双麦克风流、
-  // 或 stop 在 start 的 await 间隙插入拆到一半的通路；预热在途时 start 排其后、自然复用其建好的 worker。
-  // 同类操作进行中直接复用其在途 promise。
+  // start/stop/prewarm 单飞串行：三类操作一律入队到同一条链尾逐次执行——调用顺序即生效顺序，
+  // 「最后一次意图」必然最后生效。internal 各自幂等（start 遇 running 短路、worker 复用、stop 幂等），
+  // 逐次执行代价极低。避免并发 start 泄漏双 Worker/双麦克风流、或 stop 在 start 的 await 间隙插入
+  // 拆到一半的通路；预热在途时 start 排其后、自然复用其建好的 worker。
   private opChain: Promise<unknown> = Promise.resolve();
-  private startInFlight: Promise<WebAsrStartResult> | null = null;
-  private stopInFlight: Promise<{ ok: boolean }> | null = null;
-  private prewarmInFlight: Promise<void> | null = null;
 
   constructor(cbs: WebAsrCallbacks = {}) {
     this.cbs = cbs;
@@ -147,38 +145,26 @@ export class WebAsr {
     await ready;
   }
 
-  /** 起管线（单飞）：start 进行中重复调用复用同一 promise；否则排到操作链尾，等在途 stop 先完成。 */
+  /** 把一次操作排到链尾逐次执行；链上吞掉 reject 只做定序，结果由本次 promise 自身反映。 */
+  private enqueue<T>(op: () => Promise<T>): Promise<T> {
+    const run = this.opChain.then(op);
+    this.opChain = run.catch(() => undefined);
+    return run;
+  }
+
+  /** 起管线：排到操作链尾（调用顺序即生效顺序），等在途操作先完成。 */
   start(): Promise<WebAsrStartResult> {
-    if (this.startInFlight) return this.startInFlight;
-    const run = this.opChain.then(() => this.startInternal());
-    // 吞掉链上的 reject 只用于串行定序，各操作自身经返回值/内部 catch 反映结果，不污染后续。
-    this.opChain = run.catch(() => undefined);
-    this.startInFlight = run.finally(() => {
-      this.startInFlight = null;
-    });
-    return this.startInFlight;
+    return this.enqueue(() => this.startInternal());
   }
 
-  /** 停止会话（单飞）：stop 进行中复用同一 promise；否则排到操作链尾，等在途 start 先完成。 */
+  /** 停止会话：排到操作链尾，晚于 stop 调用的 start 不会被它拆掉。 */
   stop(): Promise<{ ok: boolean }> {
-    if (this.stopInFlight) return this.stopInFlight;
-    const run = this.opChain.then(() => this.stopInternal());
-    this.opChain = run.catch(() => undefined);
-    this.stopInFlight = run.finally(() => {
-      this.stopInFlight = null;
-    });
-    return this.stopInFlight;
+    return this.enqueue(() => this.stopInternal());
   }
 
-  /** 预热（单飞）：进主界面即后台装模型、不触麦克风；排到操作链尾，随后的 start 自然复用其建好的 worker。 */
+  /** 预热：进主界面即后台装模型、不触麦克风；随后的 start 排其后、自然复用建好的 worker。 */
   prewarm(): Promise<void> {
-    if (this.prewarmInFlight) return this.prewarmInFlight;
-    const run = this.opChain.then(() => this.prewarmInternal());
-    this.opChain = run.catch(() => undefined);
-    this.prewarmInFlight = run.finally(() => {
-      this.prewarmInFlight = null;
-    });
-    return this.prewarmInFlight;
+    return this.enqueue(() => this.prewarmInternal());
   }
 
   /**
