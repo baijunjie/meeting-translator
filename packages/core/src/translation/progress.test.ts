@@ -42,4 +42,23 @@ describe('createTranslateProgressAggregator', () => {
     const r = agg({ status: 'progress', file: 'a.onnx', loaded: 150, total: 100 });
     expect(r?.progress).toBeCloseTo(1);
   });
+
+  it('预置分母后新文件注册不再导致总进度回落（严格单调）', () => {
+    const agg = createTranslateProgressAggregator(1000);
+
+    // encoder 先到：分母用预置的 1000 而非仅 encoder 的 200
+    const a = agg({ status: 'progress', file: 'encoder.onnx', loaded: 100, total: 200 });
+    expect(a?.progress).toBeCloseTo(0.1);
+
+    // decoder 注册：真实 total 之和(1000)未超过预置值，总进度只进不退
+    const b = agg({ status: 'progress', file: 'decoder.onnx', loaded: 80, total: 800 });
+    expect(b?.progress).toBeCloseTo(0.18);
+    expect(b!.progress).toBeGreaterThanOrEqual(a!.progress);
+  });
+
+  it('真实 total 之和超过预置值时改用真实分母，进度仍封顶 100%', () => {
+    const agg = createTranslateProgressAggregator(100);
+    const r = agg({ status: 'progress', file: 'a.onnx', loaded: 300, total: 300 });
+    expect(r?.progress).toBeCloseTo(1);
+  });
 });

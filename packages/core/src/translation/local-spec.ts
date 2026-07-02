@@ -37,6 +37,11 @@ export interface LocalModelSpec {
    * 缓存按文件粒度写入/逐出，只查目录或任一文件存在会把部分缺失误判为已就绪。
    */
   weightFiles: string[];
+  /**
+   * 全部需下载文件的近似总字节（非精确值），用于预置下载进度聚合器的分母：
+   * 从第一个进度事件起分母即为全量，总进度不因文件陆续注册而回落。
+   */
+  approxDownloadBytes: number;
   /** app 语言（含 ASR 源码 yue）→ 处理方式；未列出的语言回退到 fallbackLang */
   langs: Record<string, LangEntry>;
   /** 未知语言的回退（通常英语） */
@@ -55,6 +60,7 @@ export const M2M100_SPEC: LocalModelSpec = {
   dtype: 'q8',
   // seq2seq 双权重：encoder + merged decoder（q8 档文件名带 _quantized 后缀，用特征串匹配）
   weightFiles: ['encoder_model', 'decoder_model'],
+  approxDownloadBytes: 630_000_000, // q8 encoder+decoder+tokenizer 等合计约 630MB
   fallbackLang: 'en',
   langs: {
     // zh / zh-Hant 同为中文（lang: 'zh'），只是简繁字形不同——彼此「同语言」，不经模型只做字形转换。

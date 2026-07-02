@@ -17,6 +17,11 @@ const SPECS: Record<LocalEngine, LocalModelSpec> = {
   m2m100: M2M100_SPEC,
 };
 
+/** 某本地引擎的模型规格（进度分母预置等场景使用） */
+export function localSpecFor(engine: LocalEngine): LocalModelSpec {
+  return SPECS[engine];
+}
+
 // pipeline() 返回的可调用对象：输入文本 + 源/目标语言码，输出 [{ translation_text }]
 type TranslationFn = (
   text: string,

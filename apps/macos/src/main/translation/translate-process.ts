@@ -3,6 +3,7 @@
 // 分配（如 NLLB 反量化的 ~1GB 分配在主进程会被 Chromium 分配器直接 abort）都被隔离在
 // 这里，翻译进程即便挂掉也不连累主窗口，主进程会在下次翻译时自动重启它。
 import { createTranslator, type Translator } from './translator';
+import { localSpecFor } from './local-translator';
 import { createTranslateProgressAggregator } from '@rt/core';
 import type {
   MainToTranslate,
@@ -39,8 +40,11 @@ function ensure(): Promise<Translator> {
   const instance = translator;
   if (!ready) {
     post({ type: 'status', payload: { state: 'loading' } });
-    // 模型由多个文件并行下载，经聚合器换成按字节聚合的总进度 + 各文件独立进度，避免逐文件来回跳
-    const aggregate = createTranslateProgressAggregator();
+    // 模型由多个文件并行下载，经聚合器换成按字节聚合的总进度 + 各文件独立进度，避免逐文件来回跳；
+    // 本地引擎用 spec 的近似总字节预置分母，总进度不因文件陆续注册而回落（cloud 无进度事件，不预置）
+    const aggregate = createTranslateProgressAggregator(
+      config && config.engine !== 'cloud' ? localSpecFor(config.engine).approxDownloadBytes : undefined,
+    );
     ready = instance
       .init((p) => {
         const agg = aggregate(p);

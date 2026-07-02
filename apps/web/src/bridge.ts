@@ -124,7 +124,8 @@ export function createWebBridge(): AppBridge {
     translationStatusCb?.({ state: 'loading' });
     // 模型由多个文件并行下载，逐文件百分比会让单一进度条来回跳；经聚合器换成按字节聚合的
     // 总进度 + 各文件独立进度，每次加载新建一个（ModelProgress 与 TranslateProgress 同形）。
-    const aggregate = createTranslateProgressAggregator();
+    // 用 spec 的近似总字节预置分母，总进度不因文件陆续注册而回落。
+    const aggregate = createTranslateProgressAggregator(M2M100_SPEC.approxDownloadBytes);
     return getLocalTranslator()
       .warmUp((p) => {
         if (!reportProgress) return;
