@@ -4,6 +4,9 @@
 import type { Translator } from './translator';
 import type { CloudTranslationConfig } from '../types';
 
+// 单次请求超时上限：无超时的挂起请求会让该行的「翻译中」动画无法结束
+const REQUEST_TIMEOUT_MS = 30_000;
+
 const LANG_NAMES: Record<string, string> = {
   zh: 'Chinese (Simplified)',
   'zh-Hant': 'Chinese (Traditional)',
@@ -37,26 +40,39 @@ export class CloudTranslator implements Translator {
     await this.init();
     const targetName = LANG_NAMES[opts.target] ?? opts.target;
 
-    const res = await fetch(`${this.baseURL}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${this.apiKey}`,
-      },
-      body: JSON.stringify({
-        model: this.model,
-        temperature: 0.2,
-        messages: [
-          {
-            role: 'system',
-            content:
-              `You are a professional translator. Translate the user's text into ${targetName}. ` +
-              'Output only the translation itself, with no quotes, explanations, or extra text.',
-          },
-          { role: 'user', content: text },
-        ],
-      }),
-    });
+    let res: Response;
+    try {
+      res = await fetch(`${this.baseURL}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${this.apiKey}`,
+        },
+        // 特性检测：旧 Safari 无 AbortSignal.timeout（PWA 会跑在浏览器里），缺失时不设超时
+        signal:
+          typeof AbortSignal.timeout === 'function'
+            ? AbortSignal.timeout(REQUEST_TIMEOUT_MS)
+            : undefined,
+        body: JSON.stringify({
+          model: this.model,
+          temperature: 0.2,
+          messages: [
+            {
+              role: 'system',
+              content:
+                `You are a professional translator. Translate the user's text into ${targetName}. ` +
+                'Output only the translation itself, with no quotes, explanations, or extra text.',
+            },
+            { role: 'user', content: text },
+          ],
+        }),
+      });
+    } catch (e) {
+      if (e instanceof Error && (e.name === 'TimeoutError' || e.name === 'AbortError')) {
+        throw new Error('云翻译请求超时，请检查网络或端点是否可用');
+      }
+      throw e;
+    }
 
     if (!res.ok) {
       const detail = await res.text().catch(() => '');
