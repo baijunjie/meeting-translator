@@ -129,8 +129,6 @@ public class RealtimeAsrPlugin: CAPPlugin, CAPBridgedPlugin {
 
   /// Start on-device ASR: ensure models loaded, request mic, open capture, begin recognition.
   @objc func start(_ call: CAPPluginCall) {
-    notifyListeners("status", data: ["state": "loading"])
-
     requestMicPermission { [weak self] granted in
       guard let self = self else { return }
       guard granted else {
@@ -148,6 +146,11 @@ public class RealtimeAsrPlugin: CAPPlugin, CAPBridgedPlugin {
           self.notifyListeners("status", data: ["state": "running"])
           call.resolve(["ok": true])
           return
+        }
+        // Only a genuine cold start (engine still to be built) reports "loading"; after prewarm
+        // the reuse path is sub-second and flashing a model-loading hint would be misleading.
+        if self.recognizer == nil || self.vad == nil {
+          self.notifyListeners("status", data: ["state": "loading"])
         }
         do {
           try self.ensureEngineLoaded()

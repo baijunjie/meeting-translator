@@ -270,7 +270,11 @@ ipcMain.handle('pipeline:start', async (): Promise<StartResult> => {
   }
 
   try {
-    sendToRenderer('pipeline:status', { state: 'loading' });
+    // 仅真冷启动（fork 子进程装模型）才报 loading：预热后复用路径瞬时完成，
+    // 报 loading 会让每次开始录音都闪一次「识别模型加载中」的误导提示。
+    if (!asrChild) {
+      sendToRenderer('pipeline:status', { state: 'loading' });
+    }
     await ensureAsr();
   } catch (err) {
     return { ok: false, error: (err as Error).message };

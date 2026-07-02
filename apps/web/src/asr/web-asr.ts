@@ -209,11 +209,15 @@ export class WebAsr {
   /** 起管线：请求麦克风 → 16kHz AudioContext → AudioWorklet → sherpa Worker（复用或冷启动）。 */
   private async startInternal(): Promise<WebAsrStartResult> {
     if (this.running) return { ok: true };
-    this.cbs.onStatus?.({ state: 'loading' });
+    if (this.worker && this.workerFailed) {
+      this.discardWorker();
+    }
+    // 仅真冷启动（要装模型）才报 loading：预热后的复用路径只剩拿麦克风/搭音频图（亚秒级），
+    // 报 loading 会让每次开始录音都闪一次「识别模型加载中」的误导提示。
+    if (!(this.worker && this.workerReady)) {
+      this.cbs.onStatus?.({ state: 'loading' });
+    }
     try {
-      if (this.worker && this.workerFailed) {
-        this.discardWorker();
-      }
       if (this.worker && this.workerReady) {
         // 复用常驻 worker：模型仍在 WASM FS，只需重置会话计时基线，秒级恢复。
         this.worker.postMessage({ type: 'reset' } satisfies ToWorker);
