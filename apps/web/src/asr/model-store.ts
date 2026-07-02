@@ -97,12 +97,9 @@ export async function ensureModelsCached(
       continue;
     }
 
-    const blob = await fetchWithProgress(file, (fileLoaded) => {
+    await downloadIntoCache(cache, key, file, (fileLoaded) => {
       onProgress?.({ loaded: completedBase + fileLoaded, total });
     });
-
-    // 存进 Cache Storage（用同源 key 的 Response）。
-    await cache.put(key, new Response(blob));
     completedBase += file.approxBytes;
     onProgress?.({ loaded: completedBase, total });
   }
@@ -137,37 +134,55 @@ export function modelFileList(): string[] {
 }
 
 /**
- * 流式下载单个文件并回吐其已下载字节。
- * 优先用 ReadableStream 读 Content-Length 做精确单文件进度；不可用时回退到一次性 arrayBuffer。
+ * 流式下载单个文件并写入 Cache Storage：res.body.tee() 双分支，一支直接作为
+ * Response 体交给 cache.put 边下边落缓存，另一支只统计字节数回吐单文件进度——
+ * 全程不在 JS 堆里聚合完整文件，内存峰值与文件大小无关（网络是瓶颈，两支都按
+ * 网络速率消费，tee 的内部缓冲不会堆积）。
+ * cache.put 的体流中途出错时按规范不会写入条目，失败不会留下半截缓存。
  */
-async function fetchWithProgress(
+async function downloadIntoCache(
+  cache: Cache,
+  key: string,
   file: AsrModelFile,
   onFileProgress: (loaded: number) => void,
-): Promise<Blob> {
+): Promise<void> {
   const res = await fetch(resolveUrl(file), { mode: 'cors', redirect: 'follow' });
   if (!res.ok) {
     throw new Error(`下载失败 ${file.filename}: HTTP ${res.status}`);
   }
 
-  // 无法读 body 流（或无 Content-Length）：退化为整体读取，进度按 approxBytes 兜底。
+  // 无法读 body 流：退化为整体读取，进度按 approxBytes 兜底。
   if (!res.body) {
     const buf = await res.arrayBuffer();
+    await cache.put(key, new Response(buf));
     onFileProgress(file.approxBytes);
-    return new Blob([buf]);
+    return;
   }
 
-  const reader = res.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let received = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    if (value) {
-      chunks.push(value);
-      received += value.length;
-      // 单文件进度用真实已收字节，但封顶到 approxBytes，避免超过分母里该文件的份额。
-      onFileProgress(Math.min(received, file.approxBytes));
+  const [cacheStream, progressStream] = res.body.tee();
+
+  // 进度分支：只计数、不保留数据。
+  const trackProgress = async (): Promise<void> => {
+    const reader = progressStream.getReader();
+    let received = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (value) {
+        received += value.length;
+        // 单文件进度用真实已收字节，但封顶到 approxBytes，避免超过分母里该文件的份额。
+        onFileProgress(Math.min(received, file.approxBytes));
+      }
     }
+  };
+
+  try {
+    await Promise.all([cache.put(key, new Response(cacheStream)), trackProgress()]);
+  } catch (err) {
+    // 任一支失败（网络中断/写缓存失败）：取消两支释放资源（已被锁定的流返回
+    // rejected promise，allSettled 吞掉即可），并兜底删除可能存在的缓存条目。
+    await Promise.allSettled([cacheStream.cancel(), progressStream.cancel()]);
+    await cache.delete(key).catch(() => undefined);
+    throw err;
   }
-  return new Blob(chunks as BlobPart[]);
 }
