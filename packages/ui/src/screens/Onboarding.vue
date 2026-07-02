@@ -46,9 +46,12 @@ async function start(): Promise<void> {
           <p class="text-neutral-500 dark:text-neutral-400">{{ t('onboarding.configure') }}</p>
         </div>
         <settings-form :form="form" v-model:saveable="saveable" />
-        <n-button type="primary" block size="large" class="mt-4" :disabled="!saveable" @click="start">
-          {{ t('onboarding.start') }}
-        </n-button>
+        <!-- 间距放外层 div：Naive 注入的样式会盖过直接写在 n-button 上的工具类（同 MainScreen 的 sm:hidden 教训） -->
+        <div class="mt-6">
+          <n-button type="primary" block size="large" :disabled="!saveable" @click="start">
+            {{ t('onboarding.start') }}
+          </n-button>
+        </div>
       </div>
     </div>
   </div>
