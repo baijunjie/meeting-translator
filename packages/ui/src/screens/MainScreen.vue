@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed, ref, h } from 'vue';
-import { NButton, NProgress, NModal, NInput, NDropdown } from 'naive-ui';
+import { NButton, NModal, NInput, NDropdown } from 'naive-ui';
 import type { DropdownMixedOption } from 'naive-ui/es/dropdown/src/interface';
-import { Settings, Trash2, Archive, Library, Eraser, LoaderCircle, TriangleAlert, MoreHorizontal, Mic, Square } from '@lucide/vue';
+import { Settings, Trash2, Archive, Library, Eraser, LoaderCircle, TriangleAlert, MoreHorizontal, Mic, Square, RefreshCw } from '@lucide/vue';
 import { useI18n } from 'vue-i18n';
 import { settings } from '../composables/useSettings';
 import {
@@ -15,7 +15,6 @@ import {
   clearTranscript,
   translationLoading,
   translationDownloading,
-  translationProgress,
   translationError,
 } from '../composables/useTranscription';
 import TranscriptList from '../components/TranscriptList.vue';
@@ -23,7 +22,7 @@ import { fmtDateTime } from '../utils/datetime';
 import { bridge } from '../bridge';
 
 const { t } = useI18n();
-const emit = defineEmits<{ 'open-settings': []; 'open-archive': [] }>();
+const emit = defineEmits<{ 'open-settings': []; 'open-archive': []; needSetup: [] }>();
 
 // 仅已定稿记录才算"有内容可清"：实时 partial 是瞬时的，清它没意义（归档也只存 lines）
 const hasContent = computed(() => lines.length > 0);
@@ -77,13 +76,23 @@ async function confirmArchive(): Promise<void> {
 // 仍需此值让转写列表决定是否显示「翻译中」等待动画。
 const translateOn = computed<boolean>(() => settings.value?.translation.enabled ?? false);
 
+// 强制更新入口仅在桥接提供该能力时显示（目前只有 Web PWA 实现，原生端无此项）。
+// setup 时 bridge 已由 mountApp 注入，可同步判定。
+const canForceUpdate = typeof bridge().forceUpdateApp === 'function';
+
 // 移动端「...」溢出菜单（翻译开/关已移至设置的「翻译方式」，此处不再有翻译项）
 const mobileMenuOptions = computed<DropdownMixedOption[]>(() => [
-  { key: 'archive', label: t('main.archive'), icon: () => h(Archive, { size: 16 }), disabled: !hasContent.value },
   { key: 'delete', label: t('archive.delete'), icon: () => h(Trash2, { size: 16 }), disabled: !hasContent.value },
+  { key: 'archive', label: t('main.archive'), icon: () => h(Archive, { size: 16 }), disabled: !hasContent.value },
   { type: 'divider', key: 'd3' },
   { key: 'view-archive', label: t('main.viewArchives'), icon: () => h(Library, { size: 16 }) },
   { key: 'settings', label: t('main.settings'), icon: () => h(Settings, { size: 16 }) },
+  ...(canForceUpdate
+    ? ([
+        { type: 'divider', key: 'd4' },
+        { key: 'force-update', label: t('main.forceUpdate'), icon: () => h(RefreshCw, { size: 16 }) },
+      ] satisfies DropdownMixedOption[])
+    : []),
 ]);
 
 function onMobileMenuSelect(key: string): void {
@@ -99,6 +108,10 @@ function onMobileMenuSelect(key: string): void {
       break;
     case 'settings':
       emit('open-settings');
+      break;
+    case 'force-update':
+      // 注销 SW、清应用外壳缓存并整页重载（模型缓存保留），随后页面即以最新资源启动。
+      void bridge().forceUpdateApp?.();
       break;
   }
 }
@@ -121,6 +134,16 @@ async function onRecordClick(): Promise<void> {
   if (recording.value) {
     toggleRecording();
     return;
+  }
+  // ASR 模型缺失（如首次在蜂窝网络下跳过了下载）：回到下载页重走网络检查+确认，不进入录音流程
+  try {
+    const { asrReady } = await bridge().getSetupStatus();
+    if (!asrReady) {
+      emit('needSetup');
+      return;
+    }
+  } catch {
+    /* 查询失败不拦截，继续走后续权限流程 */
   }
   let status = 'granted';
   try {
@@ -160,26 +183,6 @@ function openMicSettings(): void {
 
       <!-- 窄屏隐藏，改用下方「...」菜单与底部圆形录音按钮 -->
       <div class="flex items-center gap-3.5 max-sm:hidden">
-        <!-- 翻译状态（只读）：开/关在设置的「翻译方式」里选，主页不再有独立开关。
-             仅在翻译开启且模型加载中 / 出错时提示。 -->
-        <span
-          v-if="translateOn && translationLoading"
-          class="inline-flex items-center gap-1 text-[13px] text-neutral-500 tabular-nums dark:text-neutral-400"
-          :title="translationDownloading ? t('status.transDownloading') : t('status.transLoading')"
-        >
-          <LoaderCircle :size="14" class="animate-spin" />
-          <span>{{ t('main.transPreparing') }}</span>
-          <span v-if="translationDownloading">{{ translationProgress }}%</span>
-        </span>
-        <span
-          v-else-if="translateOn && translationError"
-          class="inline-flex items-center gap-1 text-[13px] text-red-500"
-          :title="t('status.transFailed')"
-        >
-          <TriangleAlert :size="14" />
-          <span>{{ t('main.transPreparing') }}</span>
-        </span>
-
         <!-- NDropdown 无 disabled 属性：无内容时直接渲染禁用按钮，避免空状态仍能弹出菜单 -->
         <n-dropdown v-if="hasContent" trigger="click" :options="clearOptions" @select="onClearSelect">
           <n-button quaternary circle :title="t('main.clear')">
@@ -216,13 +219,29 @@ function openMicSettings(): void {
       </div>
     </header>
 
-    <!-- ASR 模型加载中：显示进度条并禁用录音 -->
-    <div v-if="preparing" class="border-b border-neutral-200 px-5 py-3 dark:border-[#3a3b44]">
-      <div class="mb-1.5 flex items-center gap-2 text-xs text-neutral-500 dark:text-neutral-400">
-        <LoaderCircle :size="14" class="animate-spin" />
-        <span>{{ t('status.loadingModel') }}</span>
-      </div>
-      <n-progress type="line" :percentage="0" :show-indicator="false" :height="6" :processing="true" />
+    <!-- ASR 模型加载中：转圈提示并禁用录音（预热无进度信号，与「准备翻译」一致的轻量样式） -->
+    <div
+      v-if="preparing"
+      class="flex items-center gap-2 border-b border-neutral-200 px-5 py-3 text-xs text-neutral-500 dark:border-[#3a3b44] dark:text-neutral-400"
+    >
+      <LoaderCircle :size="14" class="animate-spin" />
+      <span>{{ t('status.loadingModel') }}</span>
+    </div>
+
+    <!-- 翻译模型状态条（与识别模型同款样式）：加载/下载不挡录音，仅提示。 -->
+    <div
+      v-if="translateOn && translationLoading"
+      class="flex items-center gap-2 border-b border-neutral-200 px-5 py-3 text-xs text-neutral-500 dark:border-[#3a3b44] dark:text-neutral-400"
+    >
+      <LoaderCircle :size="14" class="animate-spin" />
+      <span>{{ translationDownloading ? t('status.transDownloading') : t('status.transLoading') }}</span>
+    </div>
+    <div
+      v-else-if="translateOn && translationError"
+      class="flex items-center gap-2 border-b border-neutral-200 px-5 py-3 text-xs text-red-500 dark:border-[#3a3b44]"
+    >
+      <TriangleAlert :size="14" />
+      <span>{{ t('status.transFailed') }}</span>
     </div>
 
     <transcript-list

@@ -4,10 +4,11 @@ import { NButton } from 'naive-ui';
 import { ArrowLeft } from '@lucide/vue';
 import { useI18n } from 'vue-i18n';
 import { settings, saveSettings, previewLocale, applyFontSize, previewTheme } from '../composables/useSettings';
+import { bridge } from '../bridge';
 import SettingsForm, { type SettingsFormData } from '../components/SettingsForm.vue';
 
 const { t } = useI18n();
-const emit = defineEmits<{ close: [] }>();
+const emit = defineEmits<{ close: []; needTranslationSetup: [] }>();
 
 const current = settings.value!;
 const form = reactive<SettingsFormData>({
@@ -26,13 +27,28 @@ async function save(): Promise<void> {
   // 三态映射回持久化：选「无」→ enabled=false（引擎保留原值）；选模型 → enabled=true + 该引擎。
   const enabled = form.engine !== 'none';
   const engine = form.engine === 'none' ? current.translation.engine : form.engine;
-  await saveSettings({
+  const saved = await saveSettings({
     ...current,
     nativeLang: form.nativeLang,
     fontSize: form.fontSize,
     theme: form.theme,
     translation: { ...current.translation, enabled, engine, cloud: { ...form.cloud } },
   });
+  // 保存后开启了本地翻译且模型未缓存 → 先进翻译模型下载页（含蜂窝确认）；其余情况正常关闭回主界面。
+  if (saved.translation.enabled && saved.translation.engine !== 'cloud') {
+    const getStatus = bridge().getTranslationSetupStatus;
+    if (getStatus && bridge().downloadTranslationModel) {
+      try {
+        const { ready } = await getStatus();
+        if (!ready) {
+          emit('needTranslationSetup');
+          return;
+        }
+      } catch {
+        /* 查询失败：正常关闭；缺模型会在首句触发兜底下载 */
+      }
+    }
+  }
   emit('close');
 }
 
