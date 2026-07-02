@@ -6,6 +6,7 @@ import {
   CloudTranslator,
   type SegmentTranslateRequest,
 } from '@rt/core';
+import { localModelCached } from './translation/model-cache';
 import { loadSettings, saveSettings } from './settings';
 import { asrModelsReady, downloadAsrModels } from './model-downloader';
 import { listArchives, getArchive, saveArchive, deleteArchive } from './archives';
@@ -35,14 +36,37 @@ let win: BrowserWindow | null = null;
 // ASR 识别跑在独立的 utilityProcess 子进程，主进程只转发音频、不做推理
 let asrChild: UtilityProcess | null = null;
 let asrReady: Promise<void> | null = null;
+// 是否处于录音会话（start 进入 running 后为真、stop/子进程退出后为假）。
+// prewarm 冷启动完成时据此判断：会话已由 start 接管（running）则不再发 stopped 覆盖。
+let sessionActive = false;
 
 // 渲染层的行 id：主进程单调递增，跨 ASR 子进程重启不归零。
 // 子进程内部的段序号随进程生命周期从 0 计，直接透传会与既有行冲突、译文回填错行。
 let nextLineId = 0;
 
 // 翻译跑在独立的 utilityProcess 子进程：隔离原生崩溃与超大内存分配（如 NLLB 反量化
-// 在主进程会被 Chromium 分配器 abort），翻译进程挂掉也不连累主窗口，仅丢一次翻译
-let translateChild: UtilityProcess | null = null;
+// 在主进程会被 Chromium 分配器 abort），翻译进程挂掉也不连累主窗口，仅丢一次翻译。
+// 句柄携带该进程专属的在途请求表，按进程隔离：进程退出时只 reject 发往它的请求。
+interface TranslateChild {
+  proc: UtilityProcess;
+  // 在途翻译请求：行 id → Promise 句柄。子进程 result/error 消息按 id 关联回 Promise，
+  // 把消息协议封装成 async 引擎调用供 core 编排使用；进程退出时只 reject 发往它的请求，防悬挂。
+  pending: Map<number, { resolve: (text: string) => void; reject: (e: Error) => void }>;
+}
+let translateChild: TranslateChild | null = null;
+
+// 下载页显式下载本地翻译模型的在途等待者：单飞，多次调用复用同一 promise。
+// 下载进度经既有 translation:status 通道（子进程 status 转发）上报，UI 直接消费；
+// 完成/失败由子进程的首个终态（status ready/error）或异常退出兑现此等待者。
+let pendingModelDownload: {
+  promise: Promise<{ ok: boolean; error?: string }>;
+  resolve: (r: { ok: boolean; error?: string }) => void;
+} | null = null;
+
+// 本地翻译模型是否已完整缓存：据此回答下载页「是否已缓存」，并在设置保存时门控本地模型的自动预热。
+function translationModelCached(): boolean {
+  return localModelCached(TRANSLATION_CACHE_DIR, M2M100_SPEC);
+}
 
 // 应用图标：仅开发时手动设置（dev 下 Dock 默认显示 Electron 图标）；
 // 打包后图标由 electron-builder 写入 .app，无需也无法从 asar 取此路径。
@@ -75,25 +99,12 @@ function sendToRenderer(channel: string, payload: unknown): void {
   }
 }
 
-// 翻译子进程的在途请求：行 id → Promise 句柄。子进程的 result/error 消息按 id 关联回
-// Promise，把消息协议封装成 async 引擎调用供 core 编排使用；子进程退出时全部 reject 防悬挂。
-const pendingTranslations = new Map<
-  number,
-  { resolve: (text: string) => void; reject: (e: Error) => void }
->();
-
-function rejectAllTranslations(reason: string): void {
-  for (const p of pendingTranslations.values()) {
-    p.reject(new Error(reason));
-  }
-  pendingTranslations.clear();
-}
-
-/** 经消息协议调用翻译子进程，返回按 id 关联的结果 Promise */
+/** 经消息协议调用翻译子进程，返回按 id 关联的结果 Promise（注册到当前子进程的在途请求表） */
 function requestTranslate(req: SegmentTranslateRequest): Promise<string> {
+  const child = ensureTranslateChild();
   return new Promise<string>((resolve, reject) => {
-    pendingTranslations.set(req.id, { resolve, reject });
-    ensureTranslateChild().postMessage({
+    child.pending.set(req.id, { resolve, reject });
+    child.proc.postMessage({
       type: 'translate',
       id: req.id,
       text: req.text,
@@ -104,47 +115,75 @@ function requestTranslate(req: SegmentTranslateRequest): Promise<string> {
 }
 
 /** 启动翻译子进程并按当前设置初始化 */
-function startTranslateChild(): UtilityProcess {
-  const child = utilityProcess.fork(translateWorkerPath);
-  translateChild = child;
-  child.on('message', (m: TranslateToMain) => {
+function startTranslateChild(): TranslateChild {
+  const proc = utilityProcess.fork(translateWorkerPath);
+  const pending: TranslateChild['pending'] = new Map();
+  const handle: TranslateChild = { proc, pending };
+  translateChild = handle;
+  proc.on('message', (m: TranslateToMain) => {
     if (m.type === 'status') {
       sendToRenderer('translation:status', m.payload);
+      // 显式下载等待者以**当前**子进程的首个终态兑现：ready → 成功；error → 失败
+      // （loading/进度不终结）。已被 reconfigure 替换的旧进程不参与兑现。
+      if (translateChild === handle && pendingModelDownload) {
+        if (m.payload.state === 'ready') {
+          pendingModelDownload.resolve({ ok: true });
+          pendingModelDownload = null;
+        } else if (m.payload.state === 'error') {
+          pendingModelDownload.resolve({ ok: false, error: m.payload.error });
+          pendingModelDownload = null;
+        }
+      }
     } else if (m.type === 'result') {
-      pendingTranslations.get(m.id)?.resolve(m.text);
-      pendingTranslations.delete(m.id);
+      pending.get(m.id)?.resolve(m.text);
+      pending.delete(m.id);
     } else if (m.type === 'error') {
-      pendingTranslations.get(m.id)?.reject(new Error(m.message));
-      pendingTranslations.delete(m.id);
+      pending.get(m.id)?.reject(new Error(m.message));
+      pending.delete(m.id);
     }
   });
-  child.on('exit', (code) => {
-    translateChild = null;
-    // 在途请求全部按失败结束（core 编排会据此结束对应行的等待动画）
-    rejectAllTranslations(`翻译进程退出 (${code})`);
+  proc.on('exit', (code) => {
+    // 仅当全局引用仍指向本进程时才清空：reconfigure 已 fork 新进程时，旧进程的异步 exit
+    // 不能误清新引用（否则新进程成孤儿、发往它的在途翻译被误判失败）。
+    const isCurrent = translateChild === handle;
+    if (isCurrent) {
+      translateChild = null;
+    }
+    // 只 reject 发往本进程的在途请求（core 编排据此结束对应行的等待动画），不波及其它进程。
+    for (const p of pending.values()) {
+      p.reject(new Error(`翻译进程退出 (${code})`));
+    }
+    pending.clear();
+    // 下载途中**当前**子进程退出（如模型内存过大崩溃）：兑现下载等待者为失败，供下载页重试。
+    // 已被 reconfigure 替换的旧进程退出不兑现——下载可能刚发往新进程，不能误判失败。
+    if (isCurrent && pendingModelDownload) {
+      pendingModelDownload.resolve({ ok: false, error: `翻译进程退出 (${code})` });
+      pendingModelDownload = null;
+    }
     if (code !== 0) {
       // 翻译进程异常退出（如模型内存过大崩溃）：主进程存活，提示失败，下次翻译自动重启
       sendToRenderer('translation:status', { state: 'error', error: `翻译进程异常退出 (${code})` });
     }
   });
   const t = loadSettings().translation;
-  child.postMessage({
+  proc.postMessage({
     type: 'configure',
     engine: t.engine,
     cloud: t.cloud,
     cacheDir: TRANSLATION_CACHE_DIR,
   });
-  return child;
+  return handle;
 }
 
 /** 确保翻译子进程已就绪（懒启动 + 复用） */
-function ensureTranslateChild(): UtilityProcess {
+function ensureTranslateChild(): TranslateChild {
   return translateChild ?? startTranslateChild();
 }
 
 /** 设置变更后让翻译子进程按新配置重建（kill 后下次按需重启） */
 function reconfigureTranslate(): void {
-  translateChild?.kill(); // exit 回调会清空引用
+  // 同步置空引用；旧进程的 exit 只 reject 发往它的在途请求，不影响之后按需 fork 的新进程
+  translateChild?.proc.kill();
   translateChild = null;
 }
 
@@ -201,6 +240,7 @@ function startAsrChild(): Promise<void> {
     child.on('exit', (code) => {
       asrChild = null;
       asrReady = null;
+      sessionActive = false;
       if (code !== 0) {
         sendToRenderer('pipeline:status', { state: 'error', error: `识别进程异常退出 (${code})` });
         if (!settled) {
@@ -238,7 +278,30 @@ ipcMain.handle('pipeline:start', async (): Promise<StartResult> => {
   // 子进程跨会话复用：每次开始录音都重置计时基线，segment.start 相对本次会话起点
   asrChild?.postMessage({ type: 'reset' });
   sendToRenderer('pipeline:status', { state: 'running' });
+  sessionActive = true;
   return { ok: true };
+});
+
+// 预热 ASR 管线：把识别模型装载进内存，绝不触碰麦克风、不申请权限；模型未下载时静默跳过。
+// 幂等——UI 在调用前先行禁用录音按钮，故除会话已由 start 接管（sessionActive，完成时不发
+// stopped 覆盖 running）外，任何路径（模型缺失的跳过 / 子进程已就绪 / 冷启动成败）都必须以
+// pipeline:status 的 stopped 终态收尾解禁。与并发的 pipeline:start 共用 ensureAsr 单飞天然合流。
+// 冷启动失败时子进程的 error 状态会照常上报（用户未操作也能看到提示），随后仍以 stopped 收尾。
+ipcMain.on('pipeline:prewarm', () => {
+  if (!asrModelsReady(MODELS_DIR)) {
+    sendToRenderer('pipeline:status', { state: 'stopped' });
+    return;
+  }
+  if (!asrChild) {
+    sendToRenderer('pipeline:status', { state: 'loading' });
+  }
+  ensureAsr()
+    .catch((err) => {
+      console.error('[prewarm] ASR 预热失败', err);
+    })
+    .finally(() => {
+      if (!sessionActive) sendToRenderer('pipeline:status', { state: 'stopped' });
+    });
 });
 
 // 麦克风权限：渲染层在请求权限前先查状态，自行决定是否弹说明弹窗
@@ -263,6 +326,31 @@ ipcMain.handle('setup:download-asr', async (): Promise<{ ok: boolean; error?: st
   } catch (err) {
     return { ok: false, error: (err as Error).message };
   }
+});
+
+// 下载页：本地翻译模型是否已缓存（无需下载则 ready:true，可直接进入主界面）
+ipcMain.handle('translation:setup-status', (): { ready: boolean } => ({
+  ready: translationModelCached(),
+}));
+
+// 下载页：显式下载本地翻译模型，等待子进程完成初始化后兑现。进度经 translation:status 上报。
+ipcMain.handle('translation:download', (): Promise<{ ok: boolean; error?: string }> => {
+  // 云端引擎无本地模型可下载（UI 不会在 cloud 下路由到下载页，此处仅防御）
+  if (loadSettings().translation.engine === 'cloud') {
+    return Promise.resolve({ ok: true });
+  }
+  // 单飞：在途下载复用同一 promise，避免重复 preheat 与竞态兑现
+  if (pendingModelDownload) {
+    return pendingModelDownload.promise;
+  }
+  let resolve!: (r: { ok: boolean; error?: string }) => void;
+  const promise = new Promise<{ ok: boolean; error?: string }>((res) => {
+    resolve = res;
+  });
+  pendingModelDownload = { promise, resolve };
+  // 触发子进程按当前配置懒加载模型；未缓存时即为联网下载，加载/下载进度经 status 转发到下载页
+  ensureTranslateChild().proc.postMessage({ type: 'preheat' });
+  return promise;
 });
 
 ipcMain.on('pipeline:audio', (_event, samples: Float32Array) => {
@@ -305,8 +393,15 @@ ipcMain.handle('settings:save', (_event, next: AppSettings): AppSettings => {
   if (engineChanged) {
     reconfigureTranslate();
   }
+  // 保存后自动预热（降低首句翻译延迟）：
+  // - cloud：无本地模型，直接预热（发起云端引擎的懒初始化，开销小）；
+  // - 本地：仅当模型已缓存时预热（把磁盘模型载入内存）；未缓存则不在此下载，
+  //   改由下载页显式调用 downloadTranslationModel 驱动，避免保存设置时静默触发大文件下载。
   if (saved.translation.enabled && (engineChanged || enabledTurnedOn)) {
-    ensureTranslateChild().postMessage({ type: 'preheat' });
+    const canPreheat = saved.translation.engine === 'cloud' || translationModelCached();
+    if (canPreheat) {
+      ensureTranslateChild().proc.postMessage({ type: 'preheat' });
+    }
   }
   return saved;
 });
@@ -327,6 +422,7 @@ ipcMain.handle(
 
 ipcMain.handle('pipeline:stop', () => {
   asrChild?.postMessage({ type: 'flush' });
+  sessionActive = false;
   sendToRenderer('pipeline:status', { state: 'stopped' });
   return { ok: true };
 });
@@ -337,10 +433,16 @@ app.whenReady().then(() => {
     app.dock.setIcon(APP_ICON);
   }
   createWindow();
+  // 启动即按「翻译已开 + 本地引擎 + 模型已缓存」预热本地翻译模型，降低首句翻译延迟；
+  // 未缓存则不在此下载（首次下载交给翻译模型下载页）。cloud 引擎的预热仍只在设置保存时触发。
+  const t = loadSettings().translation;
+  if (t.enabled && t.engine !== 'cloud' && translationModelCached()) {
+    ensureTranslateChild().proc.postMessage({ type: 'preheat' });
+  }
 });
 
 app.on('window-all-closed', () => {
   asrChild?.kill();
-  translateChild?.kill();
+  translateChild?.proc.kill();
   app.quit();
 });

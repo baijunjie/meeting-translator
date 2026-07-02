@@ -2,7 +2,8 @@
 // 把翻译模型(transformers.js + onnxruntime-node)隔离到独立进程：原生崩溃、超大内存
 // 分配（如 NLLB 反量化的 ~1GB 分配在主进程会被 Chromium 分配器直接 abort）都被隔离在
 // 这里，翻译进程即便挂掉也不连累主窗口，主进程会在下次翻译时自动重启它。
-import { createTranslator, type Translator, type TranslateProgress } from './translator';
+import { createTranslator, type Translator } from './translator';
+import { createTranslateProgressAggregator } from '@rt/core';
 import type {
   MainToTranslate,
   TranslateToMain,
@@ -38,19 +39,13 @@ function ensure(): Promise<Translator> {
   const instance = translator;
   if (!ready) {
     post({ type: 'status', payload: { state: 'loading' } });
-    // 模型由多个文件组成，按总字节聚合进度，避免逐文件来回跳
-    const fileBytes = new Map<string, { loaded: number; total: number }>();
+    // 模型由多个文件并行下载，经聚合器换成按字节聚合的总进度 + 各文件独立进度，避免逐文件来回跳
+    const aggregate = createTranslateProgressAggregator();
     ready = instance
-      .init((p: TranslateProgress) => {
-        if (p.file && typeof p.loaded === 'number' && typeof p.total === 'number' && p.total > 0) {
-          fileBytes.set(p.file, { loaded: p.loaded, total: p.total });
-          let loaded = 0;
-          let total = 0;
-          for (const f of fileBytes.values()) {
-            loaded += f.loaded;
-            total += f.total;
-          }
-          post({ type: 'status', payload: { state: 'loading', progress: loaded / total } });
+      .init((p) => {
+        const agg = aggregate(p);
+        if (agg) {
+          post({ type: 'status', payload: { state: 'loading', progress: agg.progress, files: agg.files } });
         }
       })
       .then(() => post({ type: 'status', payload: { state: 'ready' } }))
@@ -73,7 +68,11 @@ parentPort.on('message', (e: { data: MainToTranslate }) => {
       ready = null;
       break;
     case 'preheat':
-      ensure().catch(() => {});
+      // ensure 已就绪时不再自发状态；补发 ready 使显式下载（translation:download）的等待者必然兑现。
+      // 首次预热会与 ensure 内部的 ready 重复一次，UI 与等待者均幂等，无害。
+      ensure()
+        .then(() => post({ type: 'status', payload: { state: 'ready' } }))
+        .catch(() => {});
       break;
     case 'translate':
       ensure()
