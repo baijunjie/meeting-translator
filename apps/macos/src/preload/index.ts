@@ -5,7 +5,6 @@ const api: ElectronApi = {
   startPipeline: () => ipcRenderer.invoke('pipeline:start'),
   stopPipeline: () => ipcRenderer.invoke('pipeline:stop'),
   sendAudio: (samples) => ipcRenderer.send('pipeline:audio', samples),
-  setTranslateEnabled: (enabled) => ipcRenderer.send('translation:set-enabled', enabled),
   getMicStatus: () => ipcRenderer.invoke('mic:get-status'),
   openMicSettings: () => ipcRenderer.send('mic:open-settings'),
   getSettings: () => ipcRenderer.invoke('settings:get'),

@@ -1,6 +1,11 @@
 import path from 'node:path';
 import { app, BrowserWindow, ipcMain, shell, systemPreferences, utilityProcess, type UtilityProcess } from 'electron';
-import { M2M100_SPEC, planTranslation, CloudTranslator } from '@rt/core';
+import {
+  M2M100_SPEC,
+  translateFinalizedSegment,
+  CloudTranslator,
+  type SegmentTranslateRequest,
+} from '@rt/core';
 import { loadSettings, saveSettings } from './settings';
 import { asrModelsReady, downloadAsrModels } from './model-downloader';
 import { listArchives, getArchive, saveArchive, deleteArchive } from './archives';
@@ -70,6 +75,34 @@ function sendToRenderer(channel: string, payload: unknown): void {
   }
 }
 
+// 翻译子进程的在途请求：行 id → Promise 句柄。子进程的 result/error 消息按 id 关联回
+// Promise，把消息协议封装成 async 引擎调用供 core 编排使用；子进程退出时全部 reject 防悬挂。
+const pendingTranslations = new Map<
+  number,
+  { resolve: (text: string) => void; reject: (e: Error) => void }
+>();
+
+function rejectAllTranslations(reason: string): void {
+  for (const p of pendingTranslations.values()) {
+    p.reject(new Error(reason));
+  }
+  pendingTranslations.clear();
+}
+
+/** 经消息协议调用翻译子进程，返回按 id 关联的结果 Promise */
+function requestTranslate(req: SegmentTranslateRequest): Promise<string> {
+  return new Promise<string>((resolve, reject) => {
+    pendingTranslations.set(req.id, { resolve, reject });
+    ensureTranslateChild().postMessage({
+      type: 'translate',
+      id: req.id,
+      text: req.text,
+      source: req.source,
+      target: req.targetLang,
+    });
+  });
+}
+
 /** 启动翻译子进程并按当前设置初始化 */
 function startTranslateChild(): UtilityProcess {
   const child = utilityProcess.fork(translateWorkerPath);
@@ -78,11 +111,17 @@ function startTranslateChild(): UtilityProcess {
     if (m.type === 'status') {
       sendToRenderer('translation:status', m.payload);
     } else if (m.type === 'result') {
-      sendToRenderer('pipeline:translation', { id: m.id, text: m.text });
+      pendingTranslations.get(m.id)?.resolve(m.text);
+      pendingTranslations.delete(m.id);
+    } else if (m.type === 'error') {
+      pendingTranslations.get(m.id)?.reject(new Error(m.message));
+      pendingTranslations.delete(m.id);
     }
   });
   child.on('exit', (code) => {
     translateChild = null;
+    // 在途请求全部按失败结束（core 编排会据此结束对应行的等待动画）
+    rejectAllTranslations(`翻译进程退出 (${code})`);
     if (code !== 0) {
       // 翻译进程异常退出（如模型内存过大崩溃）：主进程存活，提示失败，下次翻译自动重启
       sendToRenderer('translation:status', { state: 'error', error: `翻译进程异常退出 (${code})` });
@@ -109,31 +148,19 @@ function reconfigureTranslate(): void {
   translateChild = null;
 }
 
-/** 对一条定稿段做翻译（fire-and-forget），失败不影响转写。目标恒为母语 */
+/** 对一条定稿段做翻译（fire-and-forget），失败不影响转写。目标恒为母语。
+ *  编排（是否翻 / pending / 字形归一化 / 错误上报）统一在 @rt/core.translateFinalizedSegment，
+ *  与 web/iOS 一致；这里注入的引擎是翻译子进程消息协议的 Promise 封装。 */
 function translateSegment(segment: SegmentPayload): void {
   const settings = loadSettings();
-  if (!settings.translation.enabled) {
-    return;
-  }
-  // 同语言是否翻、如何翻的判定统一在 @rt/core.planTranslation，与 web/iOS 一致，
-  // 避免把原文原样回显成「译文」，也不会误触发等待动画。
-  const plan = planTranslation(M2M100_SPEC, segment.lang, settings.nativeLang, segment.text);
-  if (plan.kind === 'skip') {
-    return;
-  }
-  if (plan.kind === 'script') {
-    // 仅简繁字形不同：直接产出转换后的原文，无需翻译子进程，也不显示等待动画。
-    sendToRenderer('pipeline:translation', { id: segment.id, text: plan.text });
-    return;
-  }
-  // 标记该行进入「翻译中」：渲染层在译文区显示等待动画，直到下方 result 发出最终译文。
-  sendToRenderer('pipeline:translation', { id: segment.id, text: '', pending: true });
-  ensureTranslateChild().postMessage({
-    type: 'translate',
-    id: segment.id,
-    text: segment.text,
-    source: segment.lang,
-    target: plan.targetLang,
+  void translateFinalizedSegment({
+    spec: M2M100_SPEC,
+    segment,
+    enabled: settings.translation.enabled,
+    nativeLang: settings.nativeLang,
+    translate: requestTranslate,
+    emitTranslation: (p) => sendToRenderer('pipeline:translation', p),
+    emitStatus: (s) => sendToRenderer('translation:status', s),
   });
 }
 
@@ -249,16 +276,6 @@ ipcMain.on('pipeline:audio', (_event, samples: Float32Array) => {
   );
   // 主进程只转发音频给识别子进程，不做推理
   asrChild.postMessage({ type: 'audio', samples: f });
-});
-
-ipcMain.on('translation:set-enabled', (_event, enabled: boolean) => {
-  const settings = loadSettings();
-  settings.translation.enabled = enabled;
-  saveSettings(settings);
-  // 开启时提前预热翻译器，避免第一句卡顿
-  if (enabled) {
-    ensureTranslateChild().postMessage({ type: 'preheat' });
-  }
 });
 
 ipcMain.handle('archive:list', () => listArchives());

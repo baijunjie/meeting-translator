@@ -75,4 +75,6 @@ export type MainToTranslate =
 
 export type TranslateToMain =
   | { type: 'status'; payload: TranslationStatusPayload }
-  | { type: 'result'; id: number; text: string };
+  | { type: 'result'; id: number; text: string }
+  /** 单次翻译失败，按 id 关联回主进程的在途请求；引擎级失败（模型加载等）仍走 status */
+  | { type: 'error'; id: number; message: string };

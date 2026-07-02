@@ -26,7 +26,7 @@ import {
   makeArchiveId,
   CloudTranslator,
   M2M100_SPEC,
-  planTranslation,
+  translateFinalizedSegment,
 } from '@rt/core';
 import type {
   AppBridge,
@@ -114,69 +114,43 @@ export function createIosBridge(): AppBridge {
     await Preferences.set({ key: ARCHIVES_KEY, value: JSON.stringify(records) });
   }
 
-  // 「翻译中 → 就绪/失败」统一外壳：loading 状态、结果/错误上报、结束等待动画都在这里，
-  // 具体产出交给 produce（返回已做好脚本归一化的最终译文）。云 / 设备端共用，避免两份重复。
-  async function runTranslation(
-    id: number,
-    label: string,
-    produce: () => Promise<string>,
-  ): Promise<void> {
-    translationStatusCb?.({ state: 'loading' });
-    try {
-      const text = await produce();
-      translationStatusCb?.({ state: 'ready' });
-      translationCb?.({ id, text });
-    } catch (e) {
-      console.error(label, e);
-      translationStatusCb?.({ state: 'error', error: e instanceof Error ? e.message : String(e) });
-      translationCb?.({ id, text: '' }); // 结束等待动画
-    }
-  }
-
-  // ---- 翻译：segment 到达时按当前设置翻成母语（云 / 设备端两条路径） ----
+  // ---- 翻译：segment 到达时按当前设置翻成母语。编排（是否翻 / pending / 字形归一化 /
+  //      错误上报）统一在 @rt/core.translateFinalizedSegment，三端一致；这里只注入引擎调用：
+  //      设备端 Apple Translation（iOS 18+，原生插件）或云端 CloudTranslator。 ----
   async function translateSegment(seg: SegmentPayload): Promise<void> {
     const s = cachedSettings ?? (await readSettingsOnce());
-    if (!s.translation.enabled) return;
-
-    // 同语言是否翻、如何翻的判定统一在 @rt/core.planTranslation，三端一致。
-    const plan = planTranslation(M2M100_SPEC, seg.lang, s.nativeLang, seg.text);
-    if (plan.kind === 'skip') return; // 同语言且字形一致：不发 pending，UI 不显示等待动画
-    if (plan.kind === 'script') {
-      // 仅简繁字形不同：直接产出转换后的原文，不经模型/云，也不显示等待动画。
-      translationCb?.({ id: seg.id, text: plan.text });
-      return;
-    }
-
-    // 标记该行进入「翻译中」：UI 在译文区显示等待动画，直到下方发出最终结果。
-    translationCb?.({ id: seg.id, text: '', pending: true });
-
-    // —— 设备端（非云）翻译：Apple Translation 框架（iOS 18+），原生插件 RealtimeTranslate。
-    //    不可用/空结果按失败处理（抛出，走统一错误分支，提示改用云翻译）。 ——
-    if (s.translation.engine !== 'cloud') {
-      await runTranslation(seg.id, '[translate:device]', async () => {
-        const r = await RealtimeTranslate.translate({
-          text: seg.text,
-          source: seg.lang,
-          target: plan.targetCode,
-        });
-        if (r.unavailable || !r.text) {
-          throw new Error(
-            `On-device translation unavailable (${r.reason ?? 'unknown'}); switch to cloud translation in settings.`,
-          );
+    await translateFinalizedSegment({
+      spec: M2M100_SPEC,
+      segment: seg,
+      enabled: s.translation.enabled,
+      nativeLang: s.nativeLang,
+      translate: async (req) => {
+        if (s.translation.engine !== 'cloud') {
+          // 设备端翻译：原生框架只认模型短码；不可用/空结果按失败抛出（提示改用云翻译），
+          // 繁體等字形归一化由编排层的 toScript 兜底。
+          const r = await RealtimeTranslate.translate({
+            text: req.text,
+            source: req.source,
+            target: req.targetCode,
+          });
+          if (r.unavailable || !r.text) {
+            throw new Error(
+              `On-device translation unavailable (${r.reason ?? 'unknown'}); switch to cloud translation in settings.`,
+            );
+          }
+          return r.text;
         }
-        return plan.toScript ? plan.toScript(r.text) : r.text;
-      });
-      return;
-    }
-
-    // —— 云翻译：传母语 app 语言键（zh-Hant 等），让云端直接产出对应字形；
-    //    plan.toScript 再做一次归一化兜底。 ——
-    await runTranslation(seg.id, '[translate:cloud]', async () => {
-      const text = await new CloudTranslator(s.translation.cloud).translate(seg.text, {
-        source: seg.lang,
-        target: plan.targetLang,
-      });
-      return plan.toScript ? plan.toScript(text) : text;
+        // 云端传母语 app 语言键（zh-Hant 等），让 LLM 直接产出对应字形。
+        return new CloudTranslator(s.translation.cloud).translate(req.text, {
+          source: req.source,
+          target: req.targetLang,
+        });
+      },
+      emitTranslation: (p) => translationCb?.(p),
+      emitStatus: (st) => {
+        if (st.state === 'error') console.error('[translate]', st.error);
+        translationStatusCb?.(st);
+      },
     });
   }
 
@@ -222,14 +196,6 @@ export function createIosBridge(): AppBridge {
         return { ok: false };
       }
     },
-    // ===== 翻译开关（只改 enabled 并落盘） =====
-    setTranslateEnabled(enabled: boolean): void {
-      // 开关在 UI 渲染前必已 loadSettings 填好缓存；未就绪时忽略（正常不会发生）。
-      if (!cachedSettings) return;
-      cachedSettings.translation.enabled = enabled; // 内存即时生效，翻译热路径当拍可见
-      void writeSettings(cachedSettings).catch((e) => console.error('[settings:save]', e));
-    },
-
     // ===== 麦克风权限（原生）=====
     async getMicStatus(): Promise<MicPermission> {
       try {

@@ -79,9 +79,8 @@ parentPort.on('message', (e: { data: MainToTranslate }) => {
       ensure()
         .then((t) => t.translate(msg.text, { source: msg.source, target: msg.target }))
         .then((text) => post({ type: 'result', id: msg.id, text }))
-        .catch((err) =>
-          post({ type: 'status', payload: { state: 'error', error: (err as Error).message } })
-        );
+        // 带 id 上报失败，让主进程 reject 对应的在途请求（引擎级失败已由 ensure 内部走 status）
+        .catch((err) => post({ type: 'error', id: msg.id, message: (err as Error).message }));
       break;
   }
 });

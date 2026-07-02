@@ -24,7 +24,7 @@ import {
   makeArchiveId,
   CloudTranslator,
   M2M100_SPEC,
-  planTranslation,
+  translateFinalizedSegment,
 } from '@rt/core';
 import type {
   AppBridge,
@@ -162,69 +162,41 @@ export function createWebBridge(): AppBridge {
     }
   }
 
-  // 「翻译中 → 就绪/失败」统一外壳：loading 状态、结果/错误上报、结束等待动画都在这里，
-  // 具体产出交给 produce（返回已做好脚本归一化的最终译文）。云 / 本地共用，避免两份重复。
-  async function runTranslation(
-    id: number,
-    label: string,
-    produce: () => Promise<string>,
-  ): Promise<void> {
-    translationStatusCb?.({ state: 'loading' });
-    try {
-      const text = await produce();
-      translationStatusCb?.({ state: 'ready' });
-      translationCb?.({ id, text });
-    } catch (e) {
-      console.error(label, e);
-      translationStatusCb?.({ state: 'error', error: e instanceof Error ? e.message : String(e) });
-      translationCb?.({ id, text: '' }); // 结束等待动画
-    }
-  }
-
-  // ---- 翻译：segment 到达时按当前设置翻成母语（云 / 本地两条路径） ----
+  // ---- 翻译：segment 到达时按当前设置翻成母语。编排（是否翻 / pending / 字形归一化 /
+  //      错误上报）统一在 @rt/core.translateFinalizedSegment，三端一致；这里只注入引擎调用：
+  //      云端 CloudTranslator 或本地 WebLocalTranslator（首次下载模型的进度经 status 上报）。 ----
   async function translateSegment(seg: SegmentPayload): Promise<void> {
     const s = cachedSettings ?? (await readSettingsOnce());
-    if (!s.translation.enabled) return;
-
-    // 同语言是否翻、如何翻的判定统一在 @rt/core.planTranslation，三端一致。
-    const plan = planTranslation(M2M100_SPEC, seg.lang, s.nativeLang, seg.text);
-    if (plan.kind === 'skip') return; // 同语言且字形一致：不发 pending，UI 不显示等待动画
-    if (plan.kind === 'script') {
-      // 仅简繁字形不同：直接产出转换后的原文，不经模型/云，也不显示等待动画。
-      translationCb?.({ id: seg.id, text: plan.text });
-      return;
-    }
-
-    // 标记该行进入「翻译中」：UI 在译文区显示等待动画，直到下方发出最终结果。
-    translationCb?.({ id: seg.id, text: '', pending: true });
-
-    // —— 云翻译：传母语 app 语言键（zh-Hant 等），让云端直接产出对应字形；
-    //    plan.toScript 再做一次归一化兜底。 ——
-    if (s.translation.engine === 'cloud') {
-      await runTranslation(seg.id, '[translate:cloud]', async () => {
-        const text = await new CloudTranslator(s.translation.cloud).translate(seg.text, {
-          source: seg.lang,
-          target: plan.targetLang,
-        });
-        return plan.toScript ? plan.toScript(text) : text;
-      });
-      return;
-    }
-
-    // —— 本地翻译：Transformers.js（M2M100，浏览器内）。首次会下载模型，进度透传到 onTranslationStatus。
-    //    target 传母语 app 语言键（zh-Hant 等）：translate 内部按该键的 langs 条目映射模型码并做
-    //    字形归一化（toScript），这里直接返回。 ——
-    await runTranslation(seg.id, '[translate:local]', () =>
-      getLocalTranslator().translate(
-        seg.text,
-        { source: seg.lang, target: plan.targetLang },
-        (p: ModelProgress) => {
-          if (p.status === 'progress' && typeof p.progress === 'number') {
-            translationStatusCb?.({ state: 'loading', progress: p.progress / 100 });
-          }
-        },
-      ),
-    );
+    await translateFinalizedSegment({
+      spec: M2M100_SPEC,
+      segment: seg,
+      enabled: s.translation.enabled,
+      nativeLang: s.nativeLang,
+      translate: (req) => {
+        if (s.translation.engine === 'cloud') {
+          // 云端传母语 app 语言键（zh-Hant 等），让 LLM 直接产出对应字形。
+          return new CloudTranslator(s.translation.cloud).translate(req.text, {
+            source: req.source,
+            target: req.targetLang,
+          });
+        }
+        // 本地 target 同样传 app 语言键：translate 内部按 langs 条目映射模型码并做字形归一化。
+        return getLocalTranslator().translate(
+          req.text,
+          { source: req.source, target: req.targetLang },
+          (p: ModelProgress) => {
+            if (p.status === 'progress' && typeof p.progress === 'number') {
+              translationStatusCb?.({ state: 'loading', progress: p.progress / 100 });
+            }
+          },
+        );
+      },
+      emitTranslation: (p) => translationCb?.(p),
+      emitStatus: (st) => {
+        if (st.state === 'error') console.error('[translate]', st.error);
+        translationStatusCb?.(st);
+      },
+    });
   }
 
   // ---- Web ASR（Phase 2：sherpa-onnx WASM 真识别）。回调转发给 UI；segment 还会触发翻译 ----
@@ -260,18 +232,6 @@ export function createWebBridge(): AppBridge {
     },
     async stopPipeline(): Promise<{ ok: boolean }> {
       return asr.stop();
-    },
-
-    // ===== 翻译开关（只改 enabled 并落盘，不重建翻译器） =====
-    setTranslateEnabled(enabled: boolean): void {
-      // 开关在 UI 渲染前必已 loadSettings 填好缓存；未就绪时忽略（正常不会发生）。
-      if (!cachedSettings) return;
-      cachedSettings.translation.enabled = enabled; // 内存即时生效，翻译热路径当拍可见
-      void writeSettings(cachedSettings).catch((e) => console.error('[settings:save]', e));
-      // 打开开关即预热本地模型（云端无需下载）：进度经 onTranslationStatus 上报，第一句不再等下载。
-      if (enabled && cachedSettings.translation.engine !== 'cloud') {
-        warmUpLocalModel();
-      }
     },
 
     // ===== 麦克风权限（Permissions API） =====
@@ -381,8 +341,8 @@ export function createWebBridge(): AppBridge {
   };
 
   // 预读一次设置，填充缓存（异步，不阻塞返回）。与 UI 首次 getSettings() 共享同一次读。
-  // 翻译已开 + 本地引擎则启动即预热：开关持久化为开时，重开/刷新不经过 setTranslateEnabled，
-  // 需在此预热，否则模型要拖到第一句才下载/装载。
+  // 翻译已开 + 本地引擎则启动即预热（保存设置之外的另一预热入口：重开/刷新时设置早已持久化为开），
+  // 否则模型要拖到第一句才下载/装载。
   // .then 在 IndexedDB 读完后才跑，届时 registerTranscriptionListeners 已注册好状态回调。
   void readSettingsOnce().then((s) => {
     if (s.translation.enabled && s.translation.engine !== 'cloud') {

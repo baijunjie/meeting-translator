@@ -82,11 +82,3 @@ export function previewTheme(pref: ThemePref): void {
 export function previewLocale(lang: UiLang): void {
   applyLocale(lang);
 }
-
-/** 主页翻译开关（轻量，不重建翻译器） */
-export function setTranslateEnabled(enabled: boolean): void {
-  if (settings.value) {
-    settings.value.translation.enabled = enabled;
-  }
-  bridge().setTranslateEnabled(enabled);
-}

@@ -42,7 +42,6 @@ export function createMacBridge(api: ElectronApi): AppBridge {
     },
 
     // ===== 以下全部直通 window.api =====
-    setTranslateEnabled: (enabled) => api.setTranslateEnabled(enabled),
     getMicStatus: () => api.getMicStatus(),
     openMicSettings: () => api.openMicSettings(),
     getSettings: () => api.getSettings(),
