@@ -16,10 +16,27 @@ function load(): ArchiveRecord[] {
   if (cached) {
     return cached;
   }
+  const file = archivesFile();
+  let raw: string;
   try {
-    const raw = JSON.parse(fs.readFileSync(archivesFile(), 'utf8'));
-    cached = Array.isArray(raw) ? (raw as ArchiveRecord[]) : [];
+    raw = fs.readFileSync(file, 'utf8');
   } catch {
+    // 文件不存在（首次运行等）：直接从空列表开始，不做备份
+    cached = [];
+    return cached;
+  }
+  try {
+    const parsed = JSON.parse(raw);
+    cached = Array.isArray(parsed) ? (parsed as ArchiveRecord[]) : [];
+  } catch (err) {
+    // 解析失败：把损坏文件改名保留（archives.json.corrupt-<时间戳>），避免下次保存无声
+    // 覆盖导致归档永久丢失；随后从空列表开始。
+    try {
+      fs.renameSync(file, `${file}.corrupt-${Date.now()}`);
+    } catch (renameErr) {
+      console.error('备份损坏归档文件失败:', (renameErr as Error).message);
+    }
+    console.error('归档文件解析失败:', (err as Error).message);
     cached = [];
   }
   return cached;

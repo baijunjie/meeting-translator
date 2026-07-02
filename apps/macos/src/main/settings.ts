@@ -84,7 +84,11 @@ export function loadSettings(): AppSettings {
 export function saveSettings(next: AppSettings): AppSettings {
   cached = withDefaults(next, defaults());
   try {
-    fs.writeFileSync(settingsFile(), JSON.stringify(persistable(cached), null, 2));
+    // 先写 .tmp 再原子 rename：进程中途退出不会留下半截 JSON 损坏设置
+    const file = settingsFile();
+    const tmp = `${file}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify(persistable(cached), null, 2));
+    fs.renameSync(tmp, file);
   } catch (err) {
     console.error('保存设置失败:', (err as Error).message);
   }

@@ -2,8 +2,6 @@
 // 模型的差异全部收敛到「LocalModelSpec」这份数据里——新增本地模型只需加一份 spec，
 // 翻译流程（懒加载 / 缓存判定 / 语言码映射 / 简繁脚本回退）完全通用，做到优雅插拔。
 // 模型规格 / 语言映射 / 简繁归一化是平台无关的，已下沉到 @rt/core，这里只保留依赖原生模块的执行层。
-import fs from 'node:fs';
-import path from 'node:path';
 import { pipeline, env } from '@huggingface/transformers';
 import {
   M2M100_SPEC,
@@ -11,6 +9,7 @@ import {
   type Translator,
   type TranslateProgress,
 } from '@rt/core';
+import { localModelCached } from './model-cache';
 import type { LocalEngine } from '../../shared/types';
 
 // 新增本地模型只需在此加一份 spec（许可需为可自由分发，如 MIT/Apache）。
@@ -47,9 +46,9 @@ class LocalTranslator implements Translator {
     return this.spec.langs[lang ?? ''] ?? this.spec.langs[this.spec.fallbackLang];
   }
 
-  /** 模型文件是否已在本地缓存（已下载过） */
+  /** 模型是否已完整缓存（残缺缓存视为未缓存） */
   private isCached(): boolean {
-    return fs.existsSync(path.join(this.cacheDir, this.spec.modelId, 'onnx'));
+    return localModelCached(this.cacheDir, this.spec);
   }
 
   init(onProgress?: (p: TranslateProgress) => void): Promise<void> {
@@ -61,9 +60,15 @@ class LocalTranslator implements Translator {
       this.loading = pipeline('translation', this.spec.modelId, {
         dtype: this.spec.dtype,
         progress_callback: reportProgress,
-      }).then((fn) => {
-        this.translate$ = fn as unknown as TranslationFn;
-      });
+      })
+        .then((fn) => {
+          this.translate$ = fn as unknown as TranslationFn;
+        })
+        .catch((e) => {
+          // 加载失败复位，允许重试；否则缓存的 rejected promise 会让后续 init 永久失败
+          this.loading = null;
+          throw e;
+        });
     }
     return this.loading;
   }
