@@ -50,7 +50,7 @@ const messages = {
       configure: 'Set up your preferences to get started',
       start: 'Get Started',
       subtitle: 'Choose your language',
-      title: 'Welcome to Realtime Translator',
+      title: 'Welcome to @:main.appTitle',
     },
     settings: {
       apiKey: 'API Key',
@@ -153,7 +153,7 @@ const messages = {
       configure: '簡単な設定を行って始めましょう',
       start: '使ってみる',
       subtitle: '言語を選択してください',
-      title: 'Realtime Translator へようこそ',
+      title: "@:{'main.appTitle'}へようこそ",
     },
     settings: {
       apiKey: 'API Key',
@@ -256,7 +256,7 @@ const messages = {
       configure: '간단한 설정 후 시작하세요',
       start: '시작하기',
       subtitle: '언어를 선택하세요',
-      title: 'Realtime Translator에 오신 것을 환영합니다',
+      title: "@:{'main.appTitle'}에 오신 것을 환영합니다",
     },
     settings: {
       apiKey: 'API Key',
@@ -357,7 +357,7 @@ const messages = {
       configure: '简单配置后即可开始',
       start: '开始使用',
       subtitle: '请选择你的语言',
-      title: '欢迎使用 Realtime Translator',
+      title: '欢迎使用 @:main.appTitle',
     },
     settings: {
       apiKey: 'API Key',
@@ -456,7 +456,7 @@ const messages = {
       configure: '簡單設定後即可開始',
       start: '開始使用',
       subtitle: '請選擇你的語言',
-      title: '歡迎使用 Realtime Translator',
+      title: '歡迎使用 @:main.appTitle',
     },
     settings: {
       apiKey: 'API Key',
