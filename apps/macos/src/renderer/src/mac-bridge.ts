@@ -41,6 +41,8 @@ export function createMacBridge(api: ElectronApi): AppBridge {
   }
 
   return {
+    // 构建期注入的发布版本串；define 缺失的环境（如单测导入）下不暴露
+    appVersion: typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : undefined,
     async startPipeline() {
       if (starting) return starting;
       if (mediaStream) return { ok: true }; // 已在采集中，重复调用直接返回

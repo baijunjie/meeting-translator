@@ -2,6 +2,8 @@ import { defineConfig } from 'vite';
 import vue from '@vitejs/plugin-vue';
 import tailwindcss from '@tailwindcss/vite';
 import { VitePWA } from 'vite-plugin-pwa';
+import { fileURLToPath } from 'node:url';
+import { buildVersion } from '../../scripts/build-version';
 
 // 以 index.html 为入口构建浏览器 PWA 产物到 dist/。
 // @rt/ui 与 @rt/core 以 TS 源码消费，Vite 会把它们一起打进 bundle。
@@ -12,6 +14,10 @@ const base = process.env.BASE_PATH || '/';
 
 export default defineConfig({
   base,
+  // 发布版本串（包版本+commit 短哈希），设置页经 bridge.appVersion 展示
+  define: {
+    __APP_VERSION__: JSON.stringify(buildVersion(fileURLToPath(new URL('.', import.meta.url)))),
+  },
   plugins: [
     vue(),
     tailwindcss(),

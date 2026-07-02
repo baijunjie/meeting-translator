@@ -76,6 +76,7 @@ const messages = {
       testOk: 'Connection OK',
       testing: 'Testing…',
       title: 'Settings',
+      version: 'Version',
     },
     setup: {
       cellularCancel: 'Not now',
@@ -174,6 +175,7 @@ const messages = {
       testOk: '接続に成功しました',
       testing: 'テスト中…',
       title: '設定',
+      version: 'バージョン',
     },
     setup: {
       cellularCancel: '今はしない',
@@ -270,6 +272,7 @@ const messages = {
       testOk: '연결 성공',
       testing: '테스트 중…',
       title: '설정',
+      version: '버전',
     },
     setup: {
       cellularCancel: '나중에',
@@ -366,6 +369,7 @@ const messages = {
       testOk: '连接成功',
       testing: '测试中…',
       title: '设置',
+      version: '版本',
     },
     setup: {
       cellularCancel: '暂不下载',
@@ -460,6 +464,7 @@ const messages = {
       testOk: '連線成功',
       testing: '測試中…',
       title: '設定',
+      version: '版本',
     },
     setup: {
       cellularCancel: '暫不下載',

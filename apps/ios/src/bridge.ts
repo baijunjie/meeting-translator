@@ -187,6 +187,9 @@ export function createIosBridge(): AppBridge {
   }
 
   const api: AppBridge = {
+    // 构建期注入的发布版本串；define 缺失的环境（如单测导入）下不暴露
+    appVersion: typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : undefined,
+
     // ===== ASR 管线（原生）=====
     async startPipeline(): Promise<StartResult> {
       try {

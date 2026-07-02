@@ -273,6 +273,8 @@ export function createWebBridge(): AppBridge {
 
   const api: AppBridge = {
     // iOS/iPadOS 上本地翻译模型装不下 WebKit 内存 → 只提供云端翻译（UI 据此隐藏本地引擎选项）。
+    // 构建期注入的发布版本串；define 缺失的环境（如单测导入）下不暴露
+    appVersion: typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : undefined,
     localTranslationAvailable: !isIOS(),
 
     // ===== ASR 管线 =====

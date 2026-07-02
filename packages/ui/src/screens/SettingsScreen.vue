@@ -10,6 +10,9 @@ import SettingsForm, { type SettingsFormData } from '../components/SettingsForm.
 const { t } = useI18n();
 const emit = defineEmits<{ close: []; needTranslationSetup: [] }>();
 
+// 发布版本串（构建期注入的包版本+commit 短哈希）；宿主未提供则不展示
+const appVersion = bridge().appVersion;
+
 const current = settings.value!;
 const form = reactive<SettingsFormData>({
   nativeLang: current.nativeLang,
@@ -77,6 +80,12 @@ function cancel(): void {
     <div class="flex-1 overflow-y-auto">
       <div class="mx-auto w-full max-w-[560px] px-5 py-6">
         <settings-form :form="form" require-dirty v-model:saveable="saveable" />
+        <p
+          v-if="appVersion"
+          class="mt-8 text-center text-xs text-neutral-400 select-text dark:text-neutral-500"
+        >
+          {{ t('settings.version') }} {{ appVersion }}
+        </p>
       </div>
     </div>
   </div>

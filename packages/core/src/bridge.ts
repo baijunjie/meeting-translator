@@ -44,6 +44,11 @@ export interface AppBridge {
    * 云端翻译——设置里不展示本地引擎选项，引擎恒为 cloud（见 apps/web/src/bridge.ts）。
    */
   localTranslationAvailable?: boolean;
+  /**
+   * 本应用的发布版本串：构建期注入的「包版本+commit 短哈希」（如 0.1.0-beta.1+abc1234）。
+   * 设置页据此展示；缺省时不展示。
+   */
+  appVersion?: string;
   /** 查询麦克风权限状态（用于在请求权限前先弹说明） */
   getMicStatus(): Promise<MicPermission>;
   /**

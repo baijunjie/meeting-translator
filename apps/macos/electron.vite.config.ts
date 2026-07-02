@@ -3,6 +3,7 @@ import vue from '@vitejs/plugin-vue';
 import tailwindcss from '@tailwindcss/vite';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { buildVersion } from '../../scripts/build-version';
 
 // 以配置文件自身所在目录为根，确保无论从哪个 cwd（如 monorepo 根 `pnpm --filter`）
 // 调用，别名都解析到 apps/macos/src/...。
@@ -21,6 +22,10 @@ export default defineConfig({
     plugins: [externalizeDepsPlugin({ exclude: ['@rt/core'] })],
   },
   renderer: {
+    // 发布版本串（包版本+commit 短哈希），mac-bridge 经 appVersion 暴露给设置页
+    define: {
+      __APP_VERSION__: JSON.stringify(buildVersion(root)),
+    },
     resolve: {
       alias: {
         '@': resolve(root, 'src/renderer/src'),
