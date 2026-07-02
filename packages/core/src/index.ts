@@ -1,5 +1,6 @@
 // @rt/core 公共出口：平台无关的领域类型、纯逻辑与端口契约。
 export * from './types';
+export * from './callbacks';
 export * from './settings';
 export * from './archive';
 export * from './ports';

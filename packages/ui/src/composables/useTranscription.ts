@@ -41,7 +41,7 @@ function fmtTime(offsetSeconds: number): string {
   return fmtClock(recordStartEpoch + offsetSeconds * 1000);
 }
 
-// IPC 监听只注册一次（preload 的 on* 无法反注册，避免重复累积）。
+// 应用生命周期级监听：只注册一次即可（bridge on* 支持反注册，但这些订阅与应用同寿，无需退订）。
 // 由 mountApp 在 setBridge 之后调用 registerTranscriptionListeners()，
 // 不再在模块导入时注册——此时 bridge 尚未注入。
 let registered = false;

@@ -88,10 +88,12 @@ export interface AppBridge {
   listArchives(): Promise<ArchiveSummary[]>;
   getArchive(id: string): Promise<ArchiveRecord | null>;
   deleteArchive(id: string): Promise<ArchiveSummary[]>;
-  onSetupProgress(cb: (progress: SetupProgress) => void): void;
-  onSegment(cb: (segment: SegmentPayload) => void): void;
-  onPartial(cb: (partial: PartialPayload) => void): void;
-  onTranslation(cb: (translation: TranslationPayload) => void): void;
-  onStatus(cb: (status: StatusPayload) => void): void;
-  onTranslationStatus(cb: (status: TranslationStatusPayload) => void): void;
+  // 事件订阅：追加语义（同一事件可注册多个回调），返回本次注册的反注册函数。
+  // 组件级订阅（如 SetupScreen）须在卸载时反注册，避免监听器持有已卸载组件的闭包累积。
+  onSetupProgress(cb: (progress: SetupProgress) => void): () => void;
+  onSegment(cb: (segment: SegmentPayload) => void): () => void;
+  onPartial(cb: (partial: PartialPayload) => void): () => void;
+  onTranslation(cb: (translation: TranslationPayload) => void): () => void;
+  onStatus(cb: (status: StatusPayload) => void): () => void;
+  onTranslationStatus(cb: (status: TranslationStatusPayload) => void): () => void;
 }

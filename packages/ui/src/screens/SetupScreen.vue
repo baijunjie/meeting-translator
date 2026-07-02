@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue';
 import { NProgress, NButton } from 'naive-ui';
 import { LoaderCircle } from '@lucide/vue';
 import { useI18n } from 'vue-i18n';
@@ -61,10 +61,12 @@ const fileList = computed(() =>
     : [],
 );
 
-bridge().onSetupProgress((p) => {
+// 组件级订阅：卸载时反注册，避免每次挂载都累积一个持有本组件 refs 的监听器
+const offSetupProgress = bridge().onSetupProgress((p) => {
   loaded.value = p.loaded;
   total.value = p.total;
 });
+onBeforeUnmount(offSetupProgress);
 
 async function start(): Promise<void> {
   confirming.value = false;

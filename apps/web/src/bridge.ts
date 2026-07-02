@@ -27,6 +27,7 @@ import {
   hasAllWeightFiles,
   translateFinalizedSegment,
   createTranslateProgressAggregator,
+  createCallbackHub,
 } from '@rt/core';
 import type {
   AppBridge,
@@ -96,12 +97,12 @@ function applyPlatformConstraints(s: AppSettings): AppSettings {
 
 export function createWebBridge(): AppBridge {
   // —— UI 注册的回调（mountApp → registerTranscriptionListeners 时注入） ——
-  let segmentCb: ((s: SegmentPayload) => void) | null = null;
-  let partialCb: ((p: PartialPayload) => void) | null = null;
-  let translationCb: ((t: TranslationPayload) => void) | null = null;
-  let statusCb: ((s: StatusPayload) => void) | null = null;
-  let translationStatusCb: ((s: TranslationStatusPayload) => void) | null = null;
-  let setupProgressCb: ((p: SetupProgress) => void) | null = null;
+  const segmentCb = createCallbackHub<SegmentPayload>();
+  const partialCb = createCallbackHub<PartialPayload>();
+  const translationCb = createCallbackHub<TranslationPayload>();
+  const statusCb = createCallbackHub<StatusPayload>();
+  const translationStatusCb = createCallbackHub<TranslationStatusPayload>();
+  const setupProgressCb = createCallbackHub<SetupProgress>();
 
   // —— 缓存设置：翻译热路径（segment 到达）同步读开关/引擎/母语，免得每段都 await IndexedDB。
   //    翻译开关就是 cachedSettings.translation.enabled，改后即时生效并落盘，不再另存一份布尔。 ——
@@ -121,7 +122,7 @@ export function createWebBridge(): AppBridge {
     // 已缓存：只是把模型从缓存读入内存——Transformers.js 读缓存时也发进度事件，
     // 若照报会让 UI 每次装载都显示「下载中」，故抑制；未缓存才是真下载，报进度。
     const reportProgress = !(await isTranslationModelCached());
-    translationStatusCb?.({ state: 'loading' });
+    translationStatusCb.emit({ state: 'loading' });
     // 模型由多个文件并行下载，逐文件百分比会让单一进度条来回跳；经聚合器换成按字节聚合的
     // 总进度 + 各文件独立进度，每次加载新建一个（ModelProgress 与 TranslateProgress 同形）。
     // 用 spec 的近似总字节预置分母，总进度不因文件陆续注册而回落。
@@ -131,15 +132,15 @@ export function createWebBridge(): AppBridge {
         if (!reportProgress) return;
         const agg = aggregate(p);
         if (agg) {
-          translationStatusCb?.({ state: 'loading', progress: agg.progress, files: agg.files });
+          translationStatusCb.emit({ state: 'loading', progress: agg.progress, files: agg.files });
         }
       })
       .then(() => {
-        translationStatusCb?.({ state: 'ready' });
+        translationStatusCb.emit({ state: 'ready' });
       })
       .catch((e) => {
         console.error('[translate:warmup]', e);
-        translationStatusCb?.({
+        translationStatusCb.emit({
           state: 'error',
           error: e instanceof Error ? e.message : String(e),
         });
@@ -235,15 +236,15 @@ export function createWebBridge(): AppBridge {
           { source: req.source, target: req.targetLang },
           (p: ModelProgress) => {
             if (p.status === 'progress' && typeof p.progress === 'number') {
-              translationStatusCb?.({ state: 'loading', progress: p.progress / 100 });
+              translationStatusCb.emit({ state: 'loading', progress: p.progress / 100 });
             }
           },
         );
       },
-      emitTranslation: (p) => translationCb?.(p),
+      emitTranslation: (p) => translationCb.emit(p),
       emitStatus: (st) => {
         if (st.state === 'error') console.error('[translate]', st.error);
-        translationStatusCb?.(st);
+        translationStatusCb.emit(st);
       },
     });
   }
@@ -253,11 +254,11 @@ export function createWebBridge(): AppBridge {
   // id 从 0 计数，而 UI 的行与译文回填都按 id 对应，必须全局唯一，故在此改写后再上抛。
   let nextLineId = 0;
   const asr = new WebAsr({
-    onStatus: (st) => statusCb?.(st),
-    onPartial: (p) => partialCb?.(p),
+    onStatus: (st) => statusCb.emit(st),
+    onPartial: (p) => partialCb.emit(p),
     onSegment: (seg) => {
       const line: SegmentPayload = { ...seg, id: nextLineId++ };
-      segmentCb?.(line);
+      segmentCb.emit(line);
       void translateSegment(line);
     },
   });
@@ -355,7 +356,7 @@ export function createWebBridge(): AppBridge {
       // 按 @rt/core ASR_MODELS 下载 Silero VAD + SenseVoice（~230MB）到 Cache Storage，
       // 边下边通过 setupProgressCb 回吐 { loaded, total } 聚合进度。首次后命中缓存即秒回。
       try {
-        await ensureModelsCached((p) => setupProgressCb?.({ loaded: p.loaded, total: p.total }));
+        await ensureModelsCached((p) => setupProgressCb.emit({ loaded: p.loaded, total: p.total }));
         return { ok: true };
       } catch (e) {
         return { ok: false, error: e instanceof Error ? e.message : String(e) };
@@ -430,23 +431,23 @@ export function createWebBridge(): AppBridge {
     },
 
     // ===== 回调注册（与 macOS/iOS 语义一致：仅记录，事件由 WebAsr 转发） =====
-    onSetupProgress(cb: (progress: SetupProgress) => void): void {
-      setupProgressCb = cb;
+    onSetupProgress(cb: (progress: SetupProgress) => void): (() => void) {
+      return setupProgressCb.on(cb);
     },
-    onSegment(cb: (segment: SegmentPayload) => void): void {
-      segmentCb = cb;
+    onSegment(cb: (segment: SegmentPayload) => void): (() => void) {
+      return segmentCb.on(cb);
     },
-    onPartial(cb: (partial: PartialPayload) => void): void {
-      partialCb = cb;
+    onPartial(cb: (partial: PartialPayload) => void): (() => void) {
+      return partialCb.on(cb);
     },
-    onTranslation(cb: (translation: TranslationPayload) => void): void {
-      translationCb = cb;
+    onTranslation(cb: (translation: TranslationPayload) => void): (() => void) {
+      return translationCb.on(cb);
     },
-    onStatus(cb: (status: StatusPayload) => void): void {
-      statusCb = cb;
+    onStatus(cb: (status: StatusPayload) => void): (() => void) {
+      return statusCb.on(cb);
     },
-    onTranslationStatus(cb: (status: TranslationStatusPayload) => void): void {
-      translationStatusCb = cb;
+    onTranslationStatus(cb: (status: TranslationStatusPayload) => void): (() => void) {
+      return translationStatusCb.on(cb);
     },
   };
 

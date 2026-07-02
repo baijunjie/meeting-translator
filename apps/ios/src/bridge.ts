@@ -27,6 +27,7 @@ import {
   CloudTranslator,
   M2M100_SPEC,
   translateFinalizedSegment,
+  createCallbackHub,
 } from '@rt/core';
 import type {
   AppBridge,
@@ -53,12 +54,12 @@ const ARCHIVES_KEY = 'mt.archives';
 
 export function createIosBridge(): AppBridge {
   // —— UI 注册的回调（mountApp → registerTranscriptionListeners 时注入） ——
-  let segmentCb: ((s: SegmentPayload) => void) | null = null;
-  let partialCb: ((p: PartialPayload) => void) | null = null;
-  let translationCb: ((t: TranslationPayload) => void) | null = null;
-  let statusCb: ((s: StatusPayload) => void) | null = null;
-  let translationStatusCb: ((s: TranslationStatusPayload) => void) | null = null;
-  let setupProgressCb: ((p: SetupProgress) => void) | null = null;
+  const segmentCb = createCallbackHub<SegmentPayload>();
+  const partialCb = createCallbackHub<PartialPayload>();
+  const translationCb = createCallbackHub<TranslationPayload>();
+  const statusCb = createCallbackHub<StatusPayload>();
+  const translationStatusCb = createCallbackHub<TranslationStatusPayload>();
+  const setupProgressCb = createCallbackHub<SetupProgress>();
 
   // —— 缓存设置：翻译热路径（segment 到达）同步读开关/引擎/母语，免得每段都 await KV。
   //    翻译开关就是 cachedSettings.translation.enabled，改后即时生效并落盘，不再另存一份布尔。 ——
@@ -147,10 +148,10 @@ export function createIosBridge(): AppBridge {
           target: req.targetLang,
         });
       },
-      emitTranslation: (p) => translationCb?.(p),
+      emitTranslation: (p) => translationCb.emit(p),
       emitStatus: (st) => {
         if (st.state === 'error') console.error('[translate]', st.error);
-        translationStatusCb?.(st);
+        translationStatusCb.emit(st);
       },
     });
   }
@@ -162,14 +163,14 @@ export function createIosBridge(): AppBridge {
   // → translateFinalizedSegment）也用改写后的 id，保证译文/等待动画事件回填到当前会话的正确行。
   let nextLineId = 0;
   function subscribeNative(): void {
-    void RealtimeAsr.addListener('partial', (p) => partialCb?.(p)).catch(() => undefined);
+    void RealtimeAsr.addListener('partial', (p) => partialCb.emit(p)).catch(() => undefined);
     void RealtimeAsr.addListener('segment', (seg) => {
       const line: SegmentPayload = { ...seg, id: nextLineId++ };
-      segmentCb?.(line);
+      segmentCb.emit(line);
       void translateSegment(line);
     }).catch(() => undefined);
-    void RealtimeAsr.addListener('status', (s) => statusCb?.(s)).catch(() => undefined);
-    void RealtimeAsr.addListener('setupProgress', (p) => setupProgressCb?.(p)).catch(
+    void RealtimeAsr.addListener('status', (s) => statusCb.emit(s)).catch(() => undefined);
+    void RealtimeAsr.addListener('setupProgress', (p) => setupProgressCb.emit(p)).catch(
       () => undefined,
     );
   }
@@ -199,7 +200,7 @@ export function createIosBridge(): AppBridge {
       // 进主界面即后台装载 ASR 模型（不采麦、不申请权限）：fire-and-forget。
       // UI 在调用前先行禁用录音按钮、等终态 status 解禁；原生侧保证一切路径以终态收尾，
       // 调用本身 reject（纯浏览器预览无原生壳）时由这里补发 stopped，避免按钮永久禁用。
-      void RealtimeAsr.prewarm().catch(() => statusCb?.({ state: 'stopped' }));
+      void RealtimeAsr.prewarm().catch(() => statusCb.emit({ state: 'stopped' }));
     },
     async stopPipeline(): Promise<{ ok: boolean }> {
       try {
@@ -294,23 +295,23 @@ export function createIosBridge(): AppBridge {
     },
 
     // ===== 回调注册（与 macOS preload 的 on* 语义一致：仅记录，事件由 subscribeNative 转发）=====
-    onSetupProgress(cb: (progress: SetupProgress) => void): void {
-      setupProgressCb = cb;
+    onSetupProgress(cb: (progress: SetupProgress) => void): (() => void) {
+      return setupProgressCb.on(cb);
     },
-    onSegment(cb: (segment: SegmentPayload) => void): void {
-      segmentCb = cb;
+    onSegment(cb: (segment: SegmentPayload) => void): (() => void) {
+      return segmentCb.on(cb);
     },
-    onPartial(cb: (partial: PartialPayload) => void): void {
-      partialCb = cb;
+    onPartial(cb: (partial: PartialPayload) => void): (() => void) {
+      return partialCb.on(cb);
     },
-    onTranslation(cb: (translation: TranslationPayload) => void): void {
-      translationCb = cb;
+    onTranslation(cb: (translation: TranslationPayload) => void): (() => void) {
+      return translationCb.on(cb);
     },
-    onStatus(cb: (status: StatusPayload) => void): void {
-      statusCb = cb;
+    onStatus(cb: (status: StatusPayload) => void): (() => void) {
+      return statusCb.on(cb);
     },
-    onTranslationStatus(cb: (status: TranslationStatusPayload) => void): void {
-      translationStatusCb = cb;
+    onTranslationStatus(cb: (status: TranslationStatusPayload) => void): (() => void) {
+      return translationStatusCb.on(cb);
     },
   };
 

@@ -1,5 +1,12 @@
-import { contextBridge, ipcRenderer } from 'electron';
+import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
 import type { ElectronApi } from '../shared/types';
+
+// 订阅主进程事件并返回反注册函数（AppBridge on* 契约：追加语义 + 可退订）
+function subscribe<T>(channel: string, cb: (payload: T) => void): () => void {
+  const listener = (_e: IpcRendererEvent, payload: T): void => cb(payload);
+  ipcRenderer.on(channel, listener);
+  return () => ipcRenderer.removeListener(channel, listener);
+}
 
 const api: ElectronApi = {
   startPipeline: () => ipcRenderer.invoke('pipeline:start'),
@@ -15,16 +22,16 @@ const api: ElectronApi = {
   downloadAsrModels: () => ipcRenderer.invoke('setup:download-asr'),
   getTranslationSetupStatus: () => ipcRenderer.invoke('translation:setup-status'),
   downloadTranslationModel: () => ipcRenderer.invoke('translation:download'),
-  onSetupProgress: (cb) => ipcRenderer.on('setup:progress', (_e, p) => cb(p)),
+  onSetupProgress: (cb) => subscribe('setup:progress', cb),
   saveArchive: (name, lines) => ipcRenderer.invoke('archive:save', name, lines),
   listArchives: () => ipcRenderer.invoke('archive:list'),
   getArchive: (id) => ipcRenderer.invoke('archive:get', id),
   deleteArchive: (id) => ipcRenderer.invoke('archive:delete', id),
-  onSegment: (cb) => ipcRenderer.on('pipeline:segment', (_e, seg) => cb(seg)),
-  onPartial: (cb) => ipcRenderer.on('pipeline:partial', (_e, p) => cb(p)),
-  onTranslation: (cb) => ipcRenderer.on('pipeline:translation', (_e, t) => cb(t)),
-  onStatus: (cb) => ipcRenderer.on('pipeline:status', (_e, s) => cb(s)),
-  onTranslationStatus: (cb) => ipcRenderer.on('translation:status', (_e, s) => cb(s)),
+  onSegment: (cb) => subscribe('pipeline:segment', cb),
+  onPartial: (cb) => subscribe('pipeline:partial', cb),
+  onTranslation: (cb) => subscribe('pipeline:translation', cb),
+  onStatus: (cb) => subscribe('pipeline:status', cb),
+  onTranslationStatus: (cb) => subscribe('translation:status', cb),
 };
 
 contextBridge.exposeInMainWorld('api', api);
