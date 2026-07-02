@@ -25,12 +25,24 @@ function load(): ArchiveRecord[] {
   return cached;
 }
 
+// 落盘串行化：多次写按入队顺序执行，避免并发写交错；单次失败不影响后续写入。
+let writeChain: Promise<void> = Promise.resolve();
+
+// 异步落盘（fire-and-forget）：内存缓存已即时生效，调用方同步返回即可；
+// 同步写全量 JSON 会阻塞主进程事件循环（录音中主进程还在逐帧转发音频）。
+// 先写 .tmp 再原子 rename，进程中途退出不会留下半截 JSON 损坏归档。
 function persist(): void {
-  try {
-    fs.writeFileSync(archivesFile(), JSON.stringify(cached ?? [], null, 2));
-  } catch (err) {
-    console.error('保存归档失败:', (err as Error).message);
-  }
+  const snapshot = JSON.stringify(cached ?? [], null, 2);
+  writeChain = writeChain
+    .then(async () => {
+      const file = archivesFile();
+      const tmp = `${file}.tmp`;
+      await fs.promises.writeFile(tmp, snapshot);
+      await fs.promises.rename(tmp, file);
+    })
+    .catch((err) => {
+      console.error('保存归档失败:', (err as Error).message);
+    });
 }
 
 /** 列表按时间倒序（最新在前） */
