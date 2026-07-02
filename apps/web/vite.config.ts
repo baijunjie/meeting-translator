@@ -37,11 +37,15 @@ export default defineConfig({
         ],
       },
       workbox: {
-        // 预缓存应用外壳；大模型（ASR/翻译）不在此预缓存，Phase 2 用 runtime 缓存单独处理。
-        globPatterns: ['**/*.{js,css,html,svg,png,ico,woff2}'],
-        // transformers.js / onnx 模型很大，提高单文件上限只为外壳里偶发的较大 chunk 兜底，
-        // 仍不会把 HF 远程模型纳入预缓存（它们不是构建产物）。
-        maximumFileSizeToCacheInBytes: 8 * 1024 * 1024,
+        // 预缓存应用外壳 + sherpa .wasm（已安装 PWA 离线冷启动 ASR 依赖它随外壳一并预缓存）；
+        // 翻译大模型不在此预缓存，Phase 2 用 runtime 缓存单独处理。
+        globPatterns: ['**/*.{js,css,html,svg,png,ico,woff2,wasm}'],
+        // onnxruntime-web 的翻译运行时 .wasm（~24MB）不预缓存：仅本地翻译用户需要（iOS Web
+        // 只有云端翻译），随翻译模型在首次启用时按需加载，避免所有安装都多拖二十多 MB。
+        globIgnores: ['**/ort-*.wasm'],
+        // 单文件上限需覆盖 sherpa .wasm（~13MB）；transformers.js / onnx 的 HF 远程模型仍不会
+        // 被纳入预缓存（它们不是构建产物）。
+        maximumFileSizeToCacheInBytes: 20 * 1024 * 1024,
         navigateFallback: `${base}index.html`,
       },
       devOptions: {

@@ -24,7 +24,9 @@ import {
   makeArchiveId,
   CloudTranslator,
   M2M100_SPEC,
+  hasAllWeightFiles,
   translateFinalizedSegment,
+  createTranslateProgressAggregator,
 } from '@rt/core';
 import type {
   AppBridge,
@@ -35,6 +37,7 @@ import type {
   CloudTranslationConfig,
   StartResult,
   MicPermission,
+  NetworkType,
   SetupStatus,
   SetupProgress,
   SegmentPayload,
@@ -44,15 +47,44 @@ import type {
   TranslationStatusPayload,
 } from '@rt/core';
 import { WebAsr } from './asr/web-asr';
-import { areModelsCached, ensureModelsCached } from './asr/model-store';
+import { areModelsCached, ensureModelsCached, ASR_MODEL_CACHE_NAME } from './asr/model-store';
 import { WebLocalTranslator, type ModelProgress } from './translation/web-local-translator';
 import { isIOS } from './platform';
 
-const DB_NAME = 'mt';
+// Network Information API 的最小类型声明（未进 TS 标准 lib，且各浏览器支持不一）。
+// 只取判断蜂窝所需的 type 字段，其余能力（downlink、effectiveType 等）不声明。
+interface NetworkInformation {
+  readonly type?: 'bluetooth' | 'cellular' | 'ethernet' | 'none' | 'wifi' | 'wimax' | 'other' | 'unknown';
+}
+
+const DB_NAME = 'realtime-translator';
 const DB_VERSION = 1;
 const KV_STORE = 'kv'; // 设置等单键值
 const ARCHIVE_STORE = 'archives'; // 归档记录，keyPath = id
 const SETTINGS_KEY = 'settings';
+
+// Transformers.js（本项目 v4.2.0）在浏览器端默认用 Cache API 缓存模型，缓存名取 env.cacheKey，
+// 默认值即 'transformers-cache'（本项目未改此配置）。每个模型文件以其 HuggingFace 解析 URL 作
+// Request key，形如 https://huggingface.co/<modelId>/resolve/main/<file>；q8 权重文件名带
+// _quantized 后缀（如 onnx/decoder_model_merged_quantized.onnx）。据此判断本地翻译模型是否已缓存。
+const TRANSFORMERS_CACHE_NAME = 'transformers-cache';
+
+// 本地翻译模型（M2M100）是否已在 Cache Storage 里：spec 的全部权重（encoder+decoder）都有
+// 对应 .onnx 条目才算就绪——Cache Storage 按条目逐出，只查任一权重会把部分逐出误判为已就绪。
+// Cache API 不可用或查询异常时返回 false——宁可多走一次下载页（页内命中缓存会瞬间完成），
+// 也不误判为已就绪而在缺模型时跳过下载。
+async function isTranslationModelCached(): Promise<boolean> {
+  if (typeof caches === 'undefined') return false;
+  try {
+    const cache = await caches.open(TRANSFORMERS_CACHE_NAME);
+    const urls = (await cache.keys())
+      .map((req) => req.url)
+      .filter((u) => u.includes(M2M100_SPEC.modelId));
+    return hasAllWeightFiles(M2M100_SPEC, urls);
+  } catch {
+    return false;
+  }
+}
 
 // iOS/iPadOS 的 WebKit 单标签页内存装不下本地翻译模型（与 ASR 共存会崩，且 4-bit 量化在
 // ORT-web 里也跑不起来），故这些设备不提供本地翻译、引擎恒为云端。所有产出 settings 的
@@ -82,23 +114,35 @@ export function createWebBridge(): AppBridge {
     return localTranslator;
   }
 
-  // —— 本地模型预热（只下载/装载不翻译）：打开翻译开关时、以及启动时翻译已开着都会调，
-  //    进度经 onTranslationStatus 上报，第一句不再等下载。warmUp 幂等，重复调用安全。 ——
-  function warmUpLocalModel(): void {
+  // —— 本地模型预热（只下载/装载不翻译）：进度经 onTranslationStatus 上报，warmUp 幂等、重复调用安全。
+  //    状态回调在内部完成 loading→ready/error 的上报；同时把失败向上抛，供显式下载页（downloadTranslationModel）
+  //    据返回值判定 done/failed。不关心结果的调用方（保存/启动预热）自行 .catch 吞掉即可（错误已上报）。 ——
+  async function warmUpLocalModel(): Promise<void> {
+    // 已缓存：只是把模型从缓存读入内存——Transformers.js 读缓存时也发进度事件，
+    // 若照报会让 UI 每次装载都显示「下载中」，故抑制；未缓存才是真下载，报进度。
+    const reportProgress = !(await isTranslationModelCached());
     translationStatusCb?.({ state: 'loading' });
-    getLocalTranslator()
+    // 模型由多个文件并行下载，逐文件百分比会让单一进度条来回跳；经聚合器换成按字节聚合的
+    // 总进度 + 各文件独立进度，每次加载新建一个（ModelProgress 与 TranslateProgress 同形）。
+    const aggregate = createTranslateProgressAggregator();
+    return getLocalTranslator()
       .warmUp((p) => {
-        if (p.status === 'progress' && typeof p.progress === 'number') {
-          translationStatusCb?.({ state: 'loading', progress: p.progress / 100 });
+        if (!reportProgress) return;
+        const agg = aggregate(p);
+        if (agg) {
+          translationStatusCb?.({ state: 'loading', progress: agg.progress, files: agg.files });
         }
       })
-      .then(() => translationStatusCb?.({ state: 'ready' }))
+      .then(() => {
+        translationStatusCb?.({ state: 'ready' });
+      })
       .catch((e) => {
         console.error('[translate:warmup]', e);
         translationStatusCb?.({
           state: 'error',
           error: e instanceof Error ? e.message : String(e),
         });
+        throw e;
       });
   }
 
@@ -115,6 +159,10 @@ export function createWebBridge(): AppBridge {
             database.createObjectStore(ARCHIVE_STORE, { keyPath: 'id' });
           }
         },
+      }).catch((e) => {
+        // 打开失败复位，允许下次重试；否则缓存的 rejected promise 会让后续读写永久失败。
+        dbPromise = null;
+        throw e;
       });
     }
     return dbPromise;
@@ -225,10 +273,14 @@ export function createWebBridge(): AppBridge {
     // iOS/iPadOS 上本地翻译模型装不下 WebKit 内存 → 只提供云端翻译（UI 据此隐藏本地引擎选项）。
     localTranslationAvailable: !isIOS(),
 
-    // ===== ASR 管线（Web，Phase 1 桩） =====
+    // ===== ASR 管线 =====
     async startPipeline(): Promise<StartResult> {
-      // 真请求麦克风 + 建 AudioWorklet 采音；Phase 1 不识别（不回吐 segment）。
+      // 请求麦克风 + 建 AudioWorklet 采音，帧送 sherpa worker 实时识别。
       return asr.start();
+    },
+    prewarmPipeline(): void {
+      // 进主界面即后台装载 ASR 模型（不触麦克风）：fire-and-forget，失败静默（预热内部已处理并解禁按钮）。
+      void asr.prewarm().catch(() => undefined);
     },
     async stopPipeline(): Promise<{ ok: boolean }> {
       return asr.stop();
@@ -251,16 +303,30 @@ export function createWebBridge(): AppBridge {
       // 浏览器无法以编程方式打开系统/站点设置；空实现（UI 已对 web 做引导文案）。
     },
 
+    // ===== 网络类型（Network Information API） =====
+    async getNetworkType(): Promise<NetworkType> {
+      // iOS Safari/PWA 无此 API，恒 unknown；桌面 Chrome 等亦常不报 type，同样落 unknown。
+      const conn = (navigator as { connection?: NetworkInformation }).connection;
+      if (conn?.type === 'cellular') return 'cellular';
+      if (conn?.type === 'wifi') return 'wifi';
+      return 'unknown';
+    },
+
     // ===== 设置（IndexedDB） =====
     getSettings(): Promise<AppSettings> {
       return readSettingsOnce();
     },
     async saveSettings(settings: AppSettings): Promise<AppSettings> {
       const saved = await writeSettings(settings);
-      // 主页已无翻译开关，开/关改由设置里选「翻译方式」并保存触发：若开启且用本地引擎，保存即预热
-      // 本地模型（warmUp 幂等），第一句不再等下载。iOS 上 engine 已被收敛为 cloud，不会触发本地加载。
-      if (saved.translation.enabled && saved.translation.engine !== 'cloud') {
-        warmUpLocalModel();
+      // 开启本地翻译时：仅当模型已缓存才在此自动预热（warmUp 幂等），让第一句不再等装载。
+      // 未缓存则不在此启动下载——下载改由翻译模型下载页驱动（含蜂窝确认），否则蜂窝确认形同虚设。
+      // iOS 上 engine 已被收敛为 cloud，不会触发本地加载。
+      if (
+        saved.translation.enabled &&
+        saved.translation.engine !== 'cloud' &&
+        (await isTranslationModelCached())
+      ) {
+        void warmUpLocalModel().catch(() => undefined);
       }
       return saved;
     },
@@ -293,6 +359,49 @@ export function createWebBridge(): AppBridge {
       } catch (e) {
         return { ok: false, error: e instanceof Error ? e.message : String(e) };
       }
+    },
+
+    // ===== 本地翻译模型（M2M100，Transformers.js Cache API 缓存） =====
+    async getTranslationSetupStatus(): Promise<{ ready: boolean }> {
+      // 查 Transformers.js 缓存里是否已有本模型的 onnx 权重（详见 isTranslationModelCached）。
+      // 未缓存则 UI 在开启本地翻译时先进翻译模型下载页。
+      return { ready: await isTranslationModelCached() };
+    },
+    async downloadTranslationModel(): Promise<{ ok: boolean; error?: string }> {
+      // 显式下载/装载本地翻译模型：复用 warmUpLocalModel 的单飞加载路径（进度经 onTranslationStatus
+      // 上报），await 其完成；成功返回 ok，异常返回 error 供下载页重试。不另起加载路径以免与
+      // warmUp 单飞逻辑打架。首次会下 ~630MB，命中缓存则仅装载入内存、瞬间完成。
+      try {
+        await warmUpLocalModel();
+        return { ok: true };
+      } catch (e) {
+        return { ok: false, error: e instanceof Error ? e.message : String(e) };
+      }
+    },
+
+    // ===== 强制更新应用资源（已安装 PWA 长期拿不到新版本时的手动出口） =====
+    async forceUpdateApp(): Promise<void> {
+      // 注销 SW + 清应用外壳缓存后整页重载：重载时无 SW 拦截、直接回源取最新 index.html
+      // 与构建产物，随后 SW 重新注册并按新产物重新预缓存。
+      // 模型缓存必须保留（ASR ~230MB + 本地翻译 ~630MB，误删会让用户重新下载）。
+      const keep = new Set([
+        ASR_MODEL_CACHE_NAME,
+        // Transformers.js 模型缓存（env.cacheKey 默认值，本项目未改）。
+        TRANSFORMERS_CACHE_NAME,
+      ]);
+      try {
+        const regs = (await navigator.serviceWorker?.getRegistrations()) ?? [];
+        await Promise.all(regs.map((r) => r.unregister()));
+      } catch {
+        /* SW 不可用（非安全上下文等）：继续清缓存 + 重载 */
+      }
+      try {
+        const keys = await caches.keys();
+        await Promise.all(keys.filter((k) => !keep.has(k)).map((k) => caches.delete(k)));
+      } catch {
+        /* Cache Storage 不可用：仅靠注销 SW + 重载兜底 */
+      }
+      location.reload();
     },
 
     // ===== 归档（IndexedDB） =====
@@ -341,12 +450,17 @@ export function createWebBridge(): AppBridge {
   };
 
   // 预读一次设置，填充缓存（异步，不阻塞返回）。与 UI 首次 getSettings() 共享同一次读。
-  // 翻译已开 + 本地引擎则启动即预热（保存设置之外的另一预热入口：重开/刷新时设置早已持久化为开），
-  // 否则模型要拖到第一句才下载/装载。
+  // 翻译已开 + 本地引擎且模型已缓存时，启动即预热（保存设置之外的另一预热入口：重开/刷新时设置
+  // 早已持久化为开），让第一句不再等装载；未缓存则不在此下载——首次下载交给翻译模型下载页（含蜂窝
+  // 确认），否则重开应用会绕过确认直接开下。
   // .then 在 IndexedDB 读完后才跑，届时 registerTranscriptionListeners 已注册好状态回调。
-  void readSettingsOnce().then((s) => {
-    if (s.translation.enabled && s.translation.engine !== 'cloud') {
-      warmUpLocalModel();
+  void readSettingsOnce().then(async (s) => {
+    if (
+      s.translation.enabled &&
+      s.translation.engine !== 'cloud' &&
+      (await isTranslationModelCached())
+    ) {
+      void warmUpLocalModel().catch(() => undefined);
     }
   });
 

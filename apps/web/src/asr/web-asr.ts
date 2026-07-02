@@ -49,6 +49,14 @@ export class WebAsr {
   private workerFailed = false;
   private running = false;
 
+  // start/stop/prewarm 单飞互斥：把三类操作串到同一条链上，避免并发 start 泄漏双 Worker/双麦克风流、
+  // 或 stop 在 start 的 await 间隙插入拆到一半的通路；预热在途时 start 排其后、自然复用其建好的 worker。
+  // 同类操作进行中直接复用其在途 promise。
+  private opChain: Promise<unknown> = Promise.resolve();
+  private startInFlight: Promise<WebAsrStartResult> | null = null;
+  private stopInFlight: Promise<{ ok: boolean }> | null = null;
+  private prewarmInFlight: Promise<void> | null = null;
+
   constructor(cbs: WebAsrCallbacks = {}) {
     this.cbs = cbs;
   }
@@ -139,8 +147,74 @@ export class WebAsr {
     await ready;
   }
 
+  /** 起管线（单飞）：start 进行中重复调用复用同一 promise；否则排到操作链尾，等在途 stop 先完成。 */
+  start(): Promise<WebAsrStartResult> {
+    if (this.startInFlight) return this.startInFlight;
+    const run = this.opChain.then(() => this.startInternal());
+    // 吞掉链上的 reject 只用于串行定序，各操作自身经返回值/内部 catch 反映结果，不污染后续。
+    this.opChain = run.catch(() => undefined);
+    this.startInFlight = run.finally(() => {
+      this.startInFlight = null;
+    });
+    return this.startInFlight;
+  }
+
+  /** 停止会话（单飞）：stop 进行中复用同一 promise；否则排到操作链尾，等在途 start 先完成。 */
+  stop(): Promise<{ ok: boolean }> {
+    if (this.stopInFlight) return this.stopInFlight;
+    const run = this.opChain.then(() => this.stopInternal());
+    this.opChain = run.catch(() => undefined);
+    this.stopInFlight = run.finally(() => {
+      this.stopInFlight = null;
+    });
+    return this.stopInFlight;
+  }
+
+  /** 预热（单飞）：进主界面即后台装模型、不触麦克风；排到操作链尾，随后的 start 自然复用其建好的 worker。 */
+  prewarm(): Promise<void> {
+    if (this.prewarmInFlight) return this.prewarmInFlight;
+    const run = this.opChain.then(() => this.prewarmInternal());
+    this.opChain = run.catch(() => undefined);
+    this.prewarmInFlight = run.finally(() => {
+      this.prewarmInFlight = null;
+    });
+    return this.prewarmInFlight;
+  }
+
+  /**
+   * 预热识别 Worker：仅把模型装入内存，绝不请求麦克风/权限。
+   * UI 在调用前先行禁用录音按钮，故除录音会话进行中外，任何路径（含模型未缓存的跳过、
+   * worker 已就绪、失败）都必须以 stopped 状态收尾解禁；失败仅记录，
+   * 留待用户点录音时由 start 的既有错误路径如实上报。
+   */
+  private async prewarmInternal(): Promise<void> {
+    if (this.running) {
+      // 会话进行中：重申 running（解除 UI 先行禁用），不发 stopped 打回录音态
+      this.cbs.onStatus?.({ state: 'running' });
+      return;
+    }
+    if (!(await areModelsCached())) {
+      this.cbs.onStatus?.({ state: 'stopped' }); // 未下载不预热（不触发下载），仅解禁按钮
+      return;
+    }
+    if (this.worker && this.workerFailed) this.discardWorker(); // 带病 worker 先丢弃，避免被当作已就绪
+    if (this.worker) {
+      this.cbs.onStatus?.({ state: 'stopped' });
+      return;
+    }
+    this.cbs.onStatus?.({ state: 'loading' });
+    try {
+      await this.startWorker();
+      this.cbs.onStatus?.({ state: 'stopped' });
+    } catch (e) {
+      console.error('[asr:prewarm]', e);
+      this.discardWorker();
+      this.cbs.onStatus?.({ state: 'stopped' });
+    }
+  }
+
   /** 起管线：请求麦克风 → 16kHz AudioContext → AudioWorklet → sherpa Worker（复用或冷启动）。 */
-  async start(): Promise<WebAsrStartResult> {
+  private async startInternal(): Promise<WebAsrStartResult> {
     if (this.running) return { ok: true };
     this.cbs.onStatus?.({ state: 'loading' });
     try {
@@ -183,7 +257,9 @@ export class WebAsr {
       this.cbs.onStatus?.({ state: 'running' });
       return { ok: true };
     } catch (e) {
-      await this.stop();
+      // 失败路径清理已建的部分资源（worker terminate / stream stop / audioCtx close）。
+      // 直接调 stopInternal 而非公有 stop：已在操作链内，再走单飞会自等造成死锁。
+      await this.stopInternal();
       const msg = e instanceof Error ? e.message : String(e);
       this.cbs.onStatus?.({ state: 'error', error: msg });
       return { ok: false, error: msg };
@@ -191,7 +267,7 @@ export class WebAsr {
   }
 
   /** 停止会话：拆音频通路 + flush 定稿最后一段；worker 保留供下次复用。 */
-  async stop(): Promise<{ ok: boolean }> {
+  private async stopInternal(): Promise<{ ok: boolean }> {
     this.running = false;
     try {
       if (this.worklet) {

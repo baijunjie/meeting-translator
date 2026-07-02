@@ -13,8 +13,8 @@
 
 import { ASR_MODEL_FILES, requiredAsrFiles, type AsrModelFile } from '@rt/core';
 
-/** Cache Storage 里存放 ASR 模型的缓存名。 */
-const CACHE_NAME = 'mt-asr-models-v1';
+/** Cache Storage 里存放 ASR 模型的缓存名（强制更新清理应用缓存时须保留）。 */
+export const ASR_MODEL_CACHE_NAME = 'realtime-translator-asr-models-v1';
 
 // 浏览器跨源：GitHub Releases 不发 CORS 头（且 302 跳 S3），浏览器 fetch 会被拦。
 // Silero VAD 很小（~0.6MB），改为随应用同源托管在 public/models/（同源无 CORS、可即时离线）；
@@ -45,7 +45,7 @@ export function fsName(file: AsrModelFile): string {
 function cacheKey(file: AsrModelFile): string {
   // 用一个站内绝对路径作 Request key（同源），与真实远程 URL 解耦，便于版本管理。
   const rel = file.dir ? `${file.dir}/${file.filename}` : file.filename;
-  return `/__mt_asr__/${rel}`;
+  return `/__realtime-translator-asr__/${rel}`;
 }
 
 /** 各文件 approxBytes 之和，作为进度分母。 */
@@ -57,7 +57,7 @@ function totalBytes(): number {
 export async function areModelsCached(): Promise<boolean> {
   if (typeof caches === 'undefined') return false;
   try {
-    const cache = await caches.open(CACHE_NAME);
+    const cache = await caches.open(ASR_MODEL_CACHE_NAME);
     // requiredAsrFiles() 与 ASR_MODEL_FILES 顺序一致，这里直接按文件检查。
     for (const file of ASR_MODEL_FILES) {
       const hit = await cache.match(cacheKey(file));
@@ -82,7 +82,7 @@ export async function ensureModelsCached(
   if (typeof caches === 'undefined') {
     throw new Error('Cache Storage 不可用，无法缓存 ASR 模型');
   }
-  const cache = await caches.open(CACHE_NAME);
+  const cache = await caches.open(ASR_MODEL_CACHE_NAME);
   const total = totalBytes();
   // 已完成字节按「文件粒度」累计：未开始的文件实时累加其流式进度，
   // 完成/命中的文件按 approxBytes 计入 base。
@@ -115,7 +115,7 @@ export async function readCachedModels(): Promise<Map<string, Uint8Array>> {
   if (typeof caches === 'undefined') {
     throw new Error('Cache Storage 不可用');
   }
-  const cache = await caches.open(CACHE_NAME);
+  const cache = await caches.open(ASR_MODEL_CACHE_NAME);
   const out = new Map<string, Uint8Array>();
   for (const file of ASR_MODEL_FILES) {
     const hit = await cache.match(cacheKey(file));
