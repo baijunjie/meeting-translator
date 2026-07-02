@@ -35,6 +35,13 @@ export interface RealtimeAsrPlugin {
   /** 停止采集与识别，释放音频会话。 */
   stop(): Promise<{ ok: boolean }>;
 
+  /**
+   * 预热 ASR 管线：把识别模型装载进内存，不触碰麦克风、不申请权限；模型未下载时静默跳过。
+   * 立即 resolve，装载在原生串行队列异步进行，与随后的 start() 天然合流（引擎已加载则秒过）。
+   * 预热期间经 'status' 报 loading、完成后报 stopped。
+   */
+  prewarm(): Promise<void>;
+
   /** 查询 ASR 模型是否已就绪（已下载/已随包内置）。 */
   getSetupStatus(): Promise<SetupStatus>;
 
@@ -49,6 +56,9 @@ export interface RealtimeAsrPlugin {
 
   /** 打开系统设置（iOS 应用设置页，供用户授予麦克风权限）。 */
   openMicSettings(): Promise<void>;
+
+  /** 查询当前网络类型（供 UI 在下载大模型前判断是否走蜂窝并弹窗确认）。 */
+  getNetworkType(): Promise<{ type: 'wifi' | 'cellular' | 'unknown' }>;
 
   /** 订阅插件事件，返回可用于反注册的句柄。 */
   addListener<E extends keyof RealtimeAsrEventMap>(

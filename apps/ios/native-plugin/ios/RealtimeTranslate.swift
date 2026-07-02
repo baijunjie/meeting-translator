@@ -191,6 +191,41 @@ private struct TranslateWork {
   let completion: (TranslateOutcome) -> Void
 }
 
+/// Resumes a CheckedContinuation at most once, from whichever caller (session completion or
+/// timeout) fires first. Lock-guarded and @unchecked Sendable so it can be shared with the
+/// timeout Task without tripping Sendable checks. Owns that timeout Task so a completed
+/// translate cancels the pending sleep instead of letting it idle out the full window.
+@available(iOS 18.0, *)
+private final class ResumeOnceBox: @unchecked Sendable {
+  private let lock = NSLock()
+  private var continuation: CheckedContinuation<TranslateOutcome, Never>?
+  private var timeoutTask: Task<Void, Never>?
+
+  init(_ continuation: CheckedContinuation<TranslateOutcome, Never>) {
+    self.continuation = continuation
+  }
+
+  /// Register the timeout task; cancelled immediately when the continuation already resumed.
+  func setTimeoutTask(_ task: Task<Void, Never>) {
+    lock.lock()
+    let alreadyResumed = continuation == nil
+    if !alreadyResumed { timeoutTask = task }
+    lock.unlock()
+    if alreadyResumed { task.cancel() }
+  }
+
+  func resume(_ outcome: TranslateOutcome) {
+    lock.lock()
+    let cont = continuation
+    continuation = nil
+    let task = timeoutTask
+    timeoutTask = nil
+    lock.unlock()
+    cont?.resume(returning: outcome)
+    task?.cancel()
+  }
+}
+
 /// Drives Apple's `TranslationSession` headlessly by hosting an off-screen SwiftUI
 /// view. One `SessionHost` is bound to a single source/target pair; the hosted
 /// view's `.translationTask` closure stays alive consuming an AsyncStream of work,
@@ -248,6 +283,10 @@ private final class SessionHost {
   private var hostingController: UIHostingController<TranslationDriverView>?
   private var continuation: AsyncStream<TranslateWork>.Continuation?
 
+  /// Upper bound for a single translate; matches @rt/core's cloud REQUEST_TIMEOUT_MS so a stuck
+  /// session (missing/large pack, unpresented consent sheet, framework hang) can't wedge a line.
+  private let requestTimeoutSeconds: Double = 30
+
   init(source: Locale.Language, target: Locale.Language) {
     self.source = source
     self.target = target
@@ -258,38 +297,47 @@ private final class SessionHost {
     guard let continuation = continuation else {
       return .unavailable("could not start translation session")
     }
-    return await withCheckedContinuation { (resume: CheckedContinuation<TranslateOutcome, Never>) in
-      let work = TranslateWork(text: text) { outcome in
-        resume.resume(returning: outcome)
-      }
+    let timeout = requestTimeoutSeconds
+    return await withCheckedContinuation { (cont: CheckedContinuation<TranslateOutcome, Never>) in
+      // Resume-once guard: whichever of {session completion, timeout} fires first resumes; the
+      // other becomes a no-op, so a late-completing translate can never double-resume.
+      let box = ResumeOnceBox(cont)
+      let work = TranslateWork(text: text) { outcome in box.resume(outcome) }
       continuation.yield(work)
+      box.setTimeoutTask(Task {
+        try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+        box.resume(.unavailable("translation timed out"))
+      })
     }
   }
 
-  /// Build the AsyncStream + hidden hosting controller and attach it to the key window,
-  /// off-screen. Done once per host; the closure inside the SwiftUI view consumes the
-  /// stream for the lifetime of the view.
+  /// Ensure the hidden hosting controller exists AND is attached to a live window (off-screen),
+  /// so the SwiftUI view lifecycle — and the Translation framework's ability to present any
+  /// system download/consent sheet — is active. The controller is built once, but attachment is
+  /// retried on every call: if no window was available yet (or the view got detached) we leave it
+  /// unattached and re-add it next time, rather than caching a permanently-dead host.
   private func ensureHostAttached() {
-    guard hostingController == nil else { return }
+    if hostingController == nil {
+      var cont: AsyncStream<TranslateWork>.Continuation?
+      let stream = AsyncStream<TranslateWork> { c in cont = c }
+      self.continuation = cont
 
-    var cont: AsyncStream<TranslateWork>.Continuation?
-    let stream = AsyncStream<TranslateWork> { c in cont = c }
-    self.continuation = cont
+      let config = TranslationSession.Configuration(source: source, target: target)
+      let view = TranslationDriverView(configuration: config, work: stream)
+      let controller = UIHostingController(rootView: view)
+      controller.view.frame = .zero
+      controller.view.isUserInteractionEnabled = false
+      controller.view.isHidden = true
+      controller.view.alpha = 0
+      self.hostingController = controller
+    }
 
-    let config = TranslationSession.Configuration(source: source, target: target)
-    let view = TranslationDriverView(configuration: config, work: stream)
-    let controller = UIHostingController(rootView: view)
-    controller.view.frame = .zero
-    controller.view.isUserInteractionEnabled = false
-    controller.view.isHidden = true
-    controller.view.alpha = 0
-
-    // Attach off-screen to the active window so the SwiftUI view lifecycle (and the
-    // Translation framework's ability to present any system download sheet) is live.
-    if let window = Self.activeWindow() {
+    // Attach only when not already in a window hierarchy; skip silently if no window exists yet
+    // (work items buffer in the AsyncStream and drain once the view finally appears).
+    if let controller = hostingController, controller.view.window == nil,
+       let window = Self.activeWindow() {
       window.addSubview(controller.view)
     }
-    self.hostingController = controller
   }
 
   private static func activeWindow() -> UIWindow? {

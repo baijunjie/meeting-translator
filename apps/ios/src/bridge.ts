@@ -37,6 +37,7 @@ import type {
   CloudTranslationConfig,
   StartResult,
   MicPermission,
+  NetworkType,
   SetupStatus,
   SetupProgress,
   SegmentPayload,
@@ -156,11 +157,16 @@ export function createIosBridge(): AppBridge {
 
   // ---- 订阅原生 ASR 插件事件，转发给 UI 注册的回调 ----
   // 纯浏览器预览（无原生壳）下 addListener 会 reject，吞掉即可，不影响 UI 挂载。
+  // 行 id 由桥接层统一分配，跨录音会话单调递增：原生每次 start 都把 segmentId 归零、其 id 从 0 计数，
+  // 而 UI 的行与译文回填都按 id 对应，必须全局唯一，故在此改写后再上抛。翻译编排（translateSegment
+  // → translateFinalizedSegment）也用改写后的 id，保证译文/等待动画事件回填到当前会话的正确行。
+  let nextLineId = 0;
   function subscribeNative(): void {
     void RealtimeAsr.addListener('partial', (p) => partialCb?.(p)).catch(() => undefined);
     void RealtimeAsr.addListener('segment', (seg) => {
-      segmentCb?.(seg);
-      void translateSegment(seg);
+      const line: SegmentPayload = { ...seg, id: nextLineId++ };
+      segmentCb?.(line);
+      void translateSegment(line);
     }).catch(() => undefined);
     void RealtimeAsr.addListener('status', (s) => statusCb?.(s)).catch(() => undefined);
     void RealtimeAsr.addListener('setupProgress', (p) => setupProgressCb?.(p)).catch(
@@ -189,6 +195,12 @@ export function createIosBridge(): AppBridge {
         return { ok: false, error: e instanceof Error ? e.message : String(e) };
       }
     },
+    prewarmPipeline(): void {
+      // 进主界面即后台装载 ASR 模型（不采麦、不申请权限）：fire-and-forget。
+      // UI 在调用前先行禁用录音按钮、等终态 status 解禁；原生侧保证一切路径以终态收尾，
+      // 调用本身 reject（纯浏览器预览无原生壳）时由这里补发 stopped，避免按钮永久禁用。
+      void RealtimeAsr.prewarm().catch(() => statusCb?.({ state: 'stopped' }));
+    },
     async stopPipeline(): Promise<{ ok: boolean }> {
       try {
         return await RealtimeAsr.stop();
@@ -207,6 +219,17 @@ export function createIosBridge(): AppBridge {
     },
     openMicSettings(): void {
       void RealtimeAsr.openMicSettings().catch(() => undefined);
+    },
+    // ===== 网络类型（原生）=====
+    // 供 UI 在下载 230MB ASR 模型前判断网络：蜂窝则弹窗确认。
+    // 无原生壳（纯浏览器预览）或调用异常时返回 'unknown'，交由 UI 决定是否照常下载。
+    async getNetworkType(): Promise<NetworkType> {
+      try {
+        const r = await RealtimeAsr.getNetworkType();
+        return r.type;
+      } catch {
+        return 'unknown';
+      }
     },
 
     // ===== 设置（Preferences）=====

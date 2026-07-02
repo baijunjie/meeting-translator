@@ -15,7 +15,8 @@
 //  exact Xcode wiring (these are NOT auto-linked by `cap sync`).
 //
 //  Contract (must match ../definitions.ts):
-//    Methods : start(), stop(), getSetupStatus(), downloadModels(), getMicStatus(), openMicSettings()
+//    Methods : start(), stop(), prewarm(), getSetupStatus(), downloadModels(),
+//              getMicStatus(), openMicSettings(), getNetworkType()
 //    Events  : "partial"  -> { text: String }
 //              "segment"  -> { id: Int, text: String, lang: String, start: Double, duration: Double }
 //              "status"   -> { state: "loading"|"running"|"error"|"stopped", error?: String }
@@ -25,6 +26,7 @@
 import Foundation
 import AVFoundation
 import UIKit
+import Network
 import Capacitor
 
 @objc(RealtimeAsrPlugin)
@@ -35,11 +37,40 @@ public class RealtimeAsrPlugin: CAPPlugin, CAPBridgedPlugin {
   public let pluginMethods: [CAPPluginMethod] = [
     CAPPluginMethod(name: "start", returnType: CAPPluginReturnPromise),
     CAPPluginMethod(name: "stop", returnType: CAPPluginReturnPromise),
+    CAPPluginMethod(name: "prewarm", returnType: CAPPluginReturnPromise),
     CAPPluginMethod(name: "getSetupStatus", returnType: CAPPluginReturnPromise),
     CAPPluginMethod(name: "downloadModels", returnType: CAPPluginReturnPromise),
     CAPPluginMethod(name: "getMicStatus", returnType: CAPPluginReturnPromise),
     CAPPluginMethod(name: "openMicSettings", returnType: CAPPluginReturnPromise),
+    CAPPluginMethod(name: "getNetworkType", returnType: CAPPluginReturnPromise),
   ]
+
+  /// Register AVAudioSession lifecycle observers once, when Capacitor loads the plugin.
+  /// Interruptions (call/Siri/other audio), the current input becoming unavailable
+  /// (e.g. headphones unplugged) and a media-services reset all stop the engine out of
+  /// band; without handling them the UI would stay stuck "running" while capture is dead.
+  override public func load() {
+    let center = NotificationCenter.default
+    center.addObserver(self, selector: #selector(handleInterruption(_:)),
+                       name: AVAudioSession.interruptionNotification, object: nil)
+    center.addObserver(self, selector: #selector(handleRouteChange(_:)),
+                       name: AVAudioSession.routeChangeNotification, object: nil)
+    center.addObserver(self, selector: #selector(handleMediaServicesReset(_:)),
+                       name: AVAudioSession.mediaServicesWereResetNotification, object: nil)
+
+    // Watch the active network path so getNetworkType() can answer synchronously. The handler
+    // runs on networkQueue; it is the only writer of currentNetworkPath and reads happen on the
+    // same serial queue, keeping the cached snapshot consistent without extra locking.
+    networkMonitor.pathUpdateHandler = { [weak self] path in
+      self?.currentNetworkPath = path
+    }
+    networkMonitor.start(queue: networkQueue)
+  }
+
+  deinit {
+    NotificationCenter.default.removeObserver(self)
+    networkMonitor.cancel()
+  }
 
   // MARK: - Tunables (mirror apps/macos/src/main/pipeline.ts intent)
 
@@ -69,6 +100,11 @@ public class RealtimeAsrPlugin: CAPPlugin, CAPBridgedPlugin {
   private var vad: SherpaOnnxVoiceActivityDetectorWrapper?
 
   private var isRunning = false
+  /// Tracks whether an input tap is currently installed on the engine's bus. installTap on a
+  /// bus that already has a tap raises an uncaught NSException, and a tap can outlive the engine
+  /// when the system stops it (interruption / route loss), so removeTap must key off this flag
+  /// rather than `audioEngine.isRunning`.
+  private var tapInstalled = false
   private var segmentId = 0
 
   /// Carry-over of <512-sample remainders between buffers so VAD always gets full windows.
@@ -79,6 +115,15 @@ public class RealtimeAsrPlugin: CAPPlugin, CAPBridgedPlugin {
   /// Total 16 kHz samples consumed since start() — used for partial throttling.
   private var totalSamples = 0
   private var lastPartialAtSamples = 0
+
+  // MARK: - Network reachability (NWPathMonitor -> getNetworkType)
+
+  /// Monitors the active network path; started in load(), cancelled in deinit.
+  private let networkMonitor = NWPathMonitor()
+  /// Serial queue the monitor calls back on; also guards reads of currentNetworkPath.
+  private let networkQueue = DispatchQueue(label: "io.github.baijunjie.realtimetranslator.network")
+  /// Latest path from the monitor's handler; nil until its first callback lands.
+  private var currentNetworkPath: NWPath?
 
   // MARK: - Capacitor methods (match ../definitions.ts)
 
@@ -96,6 +141,14 @@ public class RealtimeAsrPlugin: CAPPlugin, CAPBridgedPlugin {
       }
       // Build recognizer/VAD + open the mic on the ASR queue (model load can take seconds).
       self.asrQueue.async {
+        // Reentrancy guard: start/stop and the running flag are only touched on asrQueue, so
+        // the serial queue makes this check cover both an already-running session and one still
+        // in the (multi-second) model-load / startCapture phase — no double installTap.
+        guard !self.isRunning else {
+          self.notifyListeners("status", data: ["state": "running"])
+          call.resolve(["ok": true])
+          return
+        }
         do {
           try self.ensureEngineLoaded()
           self.resetPipelineState()
@@ -113,16 +166,92 @@ public class RealtimeAsrPlugin: CAPPlugin, CAPBridgedPlugin {
   }
 
   /// Stop capture + recognition, flush any trailing segment, release the audio session.
+  /// stopCapture runs on asrQueue so it serializes with a still-pending startCapture (whose
+  /// first run loads the model for seconds); otherwise a stop racing ahead of start would clear
+  /// isRunning while the mic kept capturing.
   @objc func stop(_ call: CAPPluginCall) {
-    stopCapture()
     asrQueue.async { [weak self] in
       guard let self = self else { call.resolve(["ok": true]); return }
+      self.stopCapture()
       self.flushTrailingSegment()
       self.isRunning = false
       self.notifyListeners("partial", data: ["text": ""])
       self.notifyListeners("status", data: ["state": "stopped"])
       call.resolve(["ok": true])
     }
+  }
+
+  /// Prewarm the recognizer/VAD into memory without touching the microphone or requesting any
+  /// permission. Idempotent. Resolves immediately while the load runs on the serial asrQueue,
+  /// so a following start() enqueues behind it and its model-load phase becomes a no-op once
+  /// loaded. The UI disables the record button before calling; every path except an active
+  /// capture session must therefore end with a terminal "stopped" status to re-enable it.
+  @objc func prewarm(_ call: CAPPluginCall) {
+    call.resolve()
+    asrQueue.async { [weak self] in
+      guard let self = self else { return }
+      // Active capture session: leave the "running" state untouched.
+      guard !self.isRunning else { return }
+      // Engine already loaded, or models not downloaded (the setup/download flow handles
+      // fetching): nothing to load, just release the record button.
+      guard self.recognizer == nil || self.vad == nil, self.modelsReady() else {
+        self.notifyListeners("status", data: ["state": "stopped"])
+        return
+      }
+      self.notifyListeners("status", data: ["state": "loading"])
+      do {
+        try self.ensureEngineLoaded()
+        self.notifyListeners("status", data: ["state": "stopped"])
+      } catch {
+        print("[prewarm] ASR engine load failed: \(error.localizedDescription)")
+        self.notifyListeners("status", data: ["state": "stopped"])
+      }
+    }
+  }
+
+  // MARK: - AVAudioSession lifecycle (interruption / route change / media reset)
+
+  /// Tear capture down in response to an out-of-band audio event (the engine is already stopped
+  /// or invalid by this point). Flush any open segment, clear state, and push a terminal status
+  /// so the UI leaves the running state. No auto-resume — the user restarts manually.
+  private func abortCapture(reason: String?) {
+    asrQueue.async { [weak self] in
+      guard let self = self, self.isRunning else { return }
+      self.stopCapture()
+      self.flushTrailingSegment()
+      self.isRunning = false
+      self.notifyListeners("partial", data: ["text": ""])
+      if let reason = reason {
+        self.notifyListeners("status", data: ["state": "error", "error": reason])
+      } else {
+        self.notifyListeners("status", data: ["state": "stopped"])
+      }
+    }
+  }
+
+  @objc private func handleInterruption(_ note: Notification) {
+    guard let raw = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
+          let type = AVAudioSession.InterruptionType(rawValue: raw) else { return }
+    // Interruption began (incoming call, Siri, another app took the session): the engine has
+    // been stopped by the system. Reflect it as stopped rather than a stuck "running".
+    if type == .began {
+      abortCapture(reason: nil)
+    }
+  }
+
+  @objc private func handleRouteChange(_ note: Notification) {
+    guard let raw = note.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt,
+          let reason = AVAudioSession.RouteChangeReason(rawValue: raw) else { return }
+    // The active input went away (e.g. wired/Bluetooth mic unplugged). Its format no longer
+    // matches the installed tap, so stop instead of risking an NSException on the stale tap.
+    if reason == .oldDeviceUnavailable {
+      abortCapture(reason: nil)
+    }
+  }
+
+  @objc private func handleMediaServicesReset(_ note: Notification) {
+    // The media server reset; every audio object (engine, tap, session) is now invalid.
+    abortCapture(reason: "audio media services were reset")
   }
 
   /// Report whether the ASR model files are present in the writable models dir.
@@ -161,6 +290,25 @@ public class RealtimeAsrPlugin: CAPPlugin, CAPBridgedPlugin {
       }
       call.resolve()
     }
+  }
+
+  /// Report the active connection type so the UI can warn before large downloads on cellular.
+  /// The read hops onto networkQueue to observe a consistent snapshot of the monitor's cache.
+  @objc func getNetworkType(_ call: CAPPluginCall) {
+    networkQueue.async { [weak self] in
+      guard let self = self else { call.resolve(["type": "unknown"]); return }
+      call.resolve(["type": self.classifyNetwork(self.currentNetworkPath)])
+    }
+  }
+
+  /// Map an NWPath to the JS NetworkType strings. Cellular takes priority; Wi-Fi and wired
+  /// Ethernet are both treated as "wifi" (unmetered). No cached path yet or an unsatisfied path
+  /// (e.g. offline) is "unknown", as is any other interface type.
+  private func classifyNetwork(_ path: NWPath?) -> String {
+    guard let path = path, path.status == .satisfied else { return "unknown" }
+    if path.usesInterfaceType(.cellular) { return "cellular" }
+    if path.usesInterfaceType(.wifi) || path.usesInterfaceType(.wiredEthernet) { return "wifi" }
+    return "unknown"
   }
 
   // MARK: - Mic permission (iOS 17+ uses AVAudioApplication; older uses AVAudioSession)
@@ -216,6 +364,12 @@ public class RealtimeAsrPlugin: CAPPlugin, CAPBridgedPlugin {
       throw asrError("cannot create audio converter")
     }
 
+    // Clear any tap left behind by a prior/interrupted session before installing a new one
+    // (installing over an existing tap raises an uncaught NSException).
+    if tapInstalled {
+      input.removeTap(onBus: 0)
+      tapInstalled = false
+    }
     input.installTap(onBus: 0, bufferSize: 2048, format: inputFormat) { [weak self] buffer, _ in
       guard let self = self else { return }
       guard let samples = self.convertToTargetSamples(buffer, converter: converter,
@@ -223,14 +377,20 @@ public class RealtimeAsrPlugin: CAPPlugin, CAPBridgedPlugin {
       // Hand off to the ASR queue — never block the realtime audio thread.
       self.asrQueue.async { self.processSamples(samples) }
     }
+    tapInstalled = true
 
     audioEngine.prepare()
     try audioEngine.start()
   }
 
   private func stopCapture() {
-    if audioEngine.isRunning {
+    // Remove the tap based on our own flag, not audioEngine.isRunning: a system interruption
+    // can stop the engine while leaving the tap installed, and the next start would then crash.
+    if tapInstalled {
       audioEngine.inputNode.removeTap(onBus: 0)
+      tapInstalled = false
+    }
+    if audioEngine.isRunning {
       audioEngine.stop()
     }
     try? AVAudioSession.sharedInstance().setActive(false, options: [.notifyOthersOnDeactivation])
@@ -433,21 +593,60 @@ public class RealtimeAsrPlugin: CAPPlugin, CAPBridgedPlugin {
 
   // MARK: - Models on disk (download-on-first-run; consumes @rt/core registry via AsrModels.swift)
 
+  /// Below this fraction of a file's registered approxBytes it is treated as truncated/corrupt.
+  /// approxBytes come from the shared @rt/core registry (packages/core/src/models.ts, mirrored
+  /// into AsrModels.swift) and are only approximate, so the bound is deliberately generous.
+  private let minModelSizeFraction = 0.8
+  /// Files registered below this size (e.g. tokens.txt) carry no meaningful size floor; for them
+  /// we only require a non-empty file rather than a fraction of an approximate byte count.
+  private let smallModelFileThreshold = 1_000_000
+
   /// Writable models root: Application Support/models (created on demand, excluded from iCloud backup).
   private func modelsDir() -> URL {
     let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-    let dir = base.appendingPathComponent("models", isDirectory: true)
+    var dir = base.appendingPathComponent("models", isDirectory: true)
     if !FileManager.default.fileExists(atPath: dir.path) {
       try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
     }
+    // Model files are large and re-downloadable; keep them out of iCloud / device backups.
+    var values = URLResourceValues()
+    values.isExcludedFromBackup = true
+    try? dir.setResourceValues(values)
     return dir
   }
 
+  /// True when a downloaded file is present and at least its lower-bound size. A file that fails
+  /// (missing or truncated) fails this check so callers treat it as "needs (re)download".
+  private func fileIsIntact(_ file: AsrModelFile, at path: String) -> Bool {
+    guard let attrs = try? FileManager.default.attributesOfItem(atPath: path),
+          let bytes = attrs[.size] as? Int else { return false }
+    let minBytes = file.approxBytes >= smallModelFileThreshold
+      ? Int(Double(file.approxBytes) * minModelSizeFraction)
+      : 1  // small files: just non-empty
+    return bytes >= minBytes
+  }
+
+  /// Integrity precheck standing in for a real checksum: every registry file must exist and clear
+  /// its size floor. A corrupt/truncated file is deleted here so the next downloadModels()
+  /// re-fetches it (the downloader skips files that already exist), and getSetupStatus / start
+  /// see "not ready" and route to re-download / error instead of letting the sherpa-onnx wrapper
+  /// fatalError on a bad model.
   private func modelsReady() -> Bool {
     let root = modelsDir()
-    return AsrModels.requiredRelativePaths.allSatisfy { rel in
-      FileManager.default.fileExists(atPath: root.appendingPathComponent(rel).path)
+    var ready = true
+    for file in AsrModels.files {
+      let rel = file.dir.isEmpty ? file.filename : "\(file.dir)/\(file.filename)"
+      let path = root.appendingPathComponent(rel).path
+      if !FileManager.default.fileExists(atPath: path) {
+        ready = false
+        continue
+      }
+      if !fileIsIntact(file, at: path) {
+        try? FileManager.default.removeItem(atPath: path)
+        ready = false
+      }
     }
+    return ready
   }
 
   /// Download every registry file (small first, big last) into the writable models dir,
