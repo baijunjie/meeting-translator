@@ -24,13 +24,25 @@ async function downloadFile(
   const total = Number(res.headers.get('content-length')) || 0;
   let loaded = 0;
   const body = Readable.fromWeb(res.body as Parameters<typeof Readable.fromWeb>[0]);
-  if (onBytes) {
-    body.on('data', (chunk: Buffer) => {
-      loaded += chunk.length;
-      onBytes(loaded, total);
-    });
+  body.on('data', (chunk: Buffer) => {
+    loaded += chunk.length;
+    onBytes?.(loaded, total);
+  });
+  // 先写 .part 临时文件，校验完整后原子 rename 到最终路径：中断/失败不会在最终路径
+  // 留下半截文件（模型就绪检查按最终路径的存在性判断，半截文件会被误判为就绪）。
+  const part = `${dest}.part`;
+  try {
+    await streamPipeline(body, fs.createWriteStream(part));
+    // 只把「少收」判为不完整：CDN 对文本文件可能压缩传输（content-length 为压缩后大小，
+    // fetch 自动解压导致实收字节更多）；截断的压缩流会在解压时直接报错，由上面的管道兜底。
+    if (total > 0 && loaded < total) {
+      throw new Error(`下载不完整 (${loaded}/${total} 字节): ${url}`);
+    }
+    fs.renameSync(part, dest);
+  } catch (err) {
+    fs.rmSync(part, { force: true });
+    throw err;
   }
-  await streamPipeline(body, fs.createWriteStream(dest));
 }
 
 /**

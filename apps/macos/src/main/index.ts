@@ -31,6 +31,10 @@ let win: BrowserWindow | null = null;
 let asrChild: UtilityProcess | null = null;
 let asrReady: Promise<void> | null = null;
 
+// 渲染层的行 id：主进程单调递增，跨 ASR 子进程重启不归零。
+// 子进程内部的段序号随进程生命周期从 0 计，直接透传会与既有行冲突、译文回填错行。
+let nextLineId = 0;
+
 // 翻译跑在独立的 utilityProcess 子进程：隔离原生崩溃与超大内存分配（如 NLLB 反量化
 // 在主进程会被 Chromium 分配器 abort），翻译进程挂掉也不连累主窗口，仅丢一次翻译
 let translateChild: UtilityProcess | null = null;
@@ -146,10 +150,13 @@ function startAsrChild(): Promise<void> {
           settled = true;
           resolve();
           break;
-        case 'segment':
-          sendToRenderer('pipeline:segment', m.payload); // 原文立即上屏
-          translateSegment(m.payload); // 译文异步回填
+        case 'segment': {
+          // 行 id 改写为主进程计数器的值：UI 上屏与译文回填都以它对应
+          const payload: SegmentPayload = { ...m.payload, id: nextLineId++ };
+          sendToRenderer('pipeline:segment', payload); // 原文立即上屏
+          translateSegment(payload); // 译文异步回填
           break;
+        }
         case 'partial':
           sendToRenderer('pipeline:partial', m.payload);
           break;
@@ -201,6 +208,8 @@ ipcMain.handle('pipeline:start', async (): Promise<StartResult> => {
   } catch (err) {
     return { ok: false, error: (err as Error).message };
   }
+  // 子进程跨会话复用：每次开始录音都重置计时基线，segment.start 相对本次会话起点
+  asrChild?.postMessage({ type: 'reset' });
   sendToRenderer('pipeline:status', { state: 'running' });
   return { ok: true };
 });

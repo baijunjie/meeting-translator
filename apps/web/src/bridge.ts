@@ -198,12 +198,13 @@ export function createWebBridge(): AppBridge {
     // 标记该行进入「翻译中」：UI 在译文区显示等待动画，直到下方发出最终结果。
     translationCb?.({ id: seg.id, text: '', pending: true });
 
-    // —— 云翻译：已直接产出目标语，母语需要脚本归一化时再兜一层。 ——
+    // —— 云翻译：传母语 app 语言键（zh-Hant 等），让云端直接产出对应字形；
+    //    plan.toScript 再做一次归一化兜底。 ——
     if (s.translation.engine === 'cloud') {
       await runTranslation(seg.id, '[translate:cloud]', async () => {
         const text = await new CloudTranslator(s.translation.cloud).translate(seg.text, {
           source: seg.lang,
-          target: plan.targetCode,
+          target: plan.targetLang,
         });
         return plan.toScript ? plan.toScript(text) : text;
       });
@@ -211,11 +212,12 @@ export function createWebBridge(): AppBridge {
     }
 
     // —— 本地翻译：Transformers.js（M2M100，浏览器内）。首次会下载模型，进度透传到 onTranslationStatus。
-    //    translate 内部已做 toScript，这里直接返回。 ——
+    //    target 传母语 app 语言键（zh-Hant 等）：translate 内部按该键的 langs 条目映射模型码并做
+    //    字形归一化（toScript），这里直接返回。 ——
     await runTranslation(seg.id, '[translate:local]', () =>
       getLocalTranslator().translate(
         seg.text,
-        { source: seg.lang, target: plan.targetCode },
+        { source: seg.lang, target: plan.targetLang },
         (p: ModelProgress) => {
           if (p.status === 'progress' && typeof p.progress === 'number') {
             translationStatusCb?.({ state: 'loading', progress: p.progress / 100 });
@@ -226,12 +228,16 @@ export function createWebBridge(): AppBridge {
   }
 
   // ---- Web ASR（Phase 2：sherpa-onnx WASM 真识别）。回调转发给 UI；segment 还会触发翻译 ----
+  // 行 id 由桥接层统一分配，跨录音会话单调递增：识别 worker 每次 start 都会重建、其内部
+  // id 从 0 计数，而 UI 的行与译文回填都按 id 对应，必须全局唯一，故在此改写后再上抛。
+  let nextLineId = 0;
   const asr = new WebAsr({
     onStatus: (st) => statusCb?.(st),
     onPartial: (p) => partialCb?.(p),
     onSegment: (seg) => {
-      segmentCb?.(seg);
-      void translateSegment(seg);
+      const line: SegmentPayload = { ...seg, id: nextLineId++ };
+      segmentCb?.(line);
+      void translateSegment(line);
     },
   });
 

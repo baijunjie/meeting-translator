@@ -138,8 +138,12 @@ export class TranscriptionPipeline {
   private historyChunks: HistoryChunk[] = [];
   private totalSamples = 0;
 
-  // 定稿段自增序号，供译文异步回填对应
+  // 定稿段序号（进程内自增；主进程下发前会改写为跨会话单调的行 id）
   private segmentId = 0;
+
+  // 本次录音会话的起始采样位置：segment.start 以此为基线换算成会话内相对秒数。
+  // 子进程跨会话复用，totalSamples 只增不减，故靠基线而非清零来对齐会话起点。
+  private sessionBase = 0;
 
   // 切段 / 部分识别状态
   private speechActive = false; // 当前是否处于一段语音中
@@ -253,6 +257,15 @@ export class TranscriptionPipeline {
     this.onPartial({ text: '' });
   }
 
+  /** 开始新一次录音会话：计时基线重置为当前采样位置，segment.start 自此从 0 计 */
+  reset(): void {
+    this.sessionBase = this.totalSamples;
+    // 上一会话的音频全部视为已定稿：句首回看与部分识别都不会跨进上一会话的尾音
+    this.partialFloor = this.totalSamples;
+    // 丢弃上一会话残留的不足一个 VAD 窗口的样本，避免跨会话串音
+    this.pending = new Float32Array(0);
+  }
+
   /**
    * 基于 VAD 的 isDetected() 自行切段：
    * - 静音→语音：开一段（起点向前回看，弥补 VAD 确认偏晚导致的句首截字）
@@ -353,7 +366,7 @@ export class TranscriptionPipeline {
       id: this.segmentId++,
       text: result.text,
       lang: result.lang,
-      start: from / SAMPLE_RATE,
+      start: (from - this.sessionBase) / SAMPLE_RATE, // 相对本次录音会话起点（秒）
       duration: (to - from) / SAMPLE_RATE,
     });
   }

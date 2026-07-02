@@ -169,11 +169,12 @@ export function createIosBridge(): AppBridge {
       return;
     }
 
-    // —— 云翻译：已直接产出目标语，母语需要脚本归一化时再兜一层。 ——
+    // —— 云翻译：传母语 app 语言键（zh-Hant 等），让云端直接产出对应字形；
+    //    plan.toScript 再做一次归一化兜底。 ——
     await runTranslation(seg.id, '[translate:cloud]', async () => {
       const text = await new CloudTranslator(s.translation.cloud).translate(seg.text, {
         source: seg.lang,
-        target: plan.targetCode,
+        target: plan.targetLang,
       });
       return plan.toScript ? plan.toScript(text) : text;
     });

@@ -31,6 +31,9 @@ parentPort.on('message', (e: { data: MainToAsr }) => {
       case 'flush':
         pipeline?.flush();
         break;
+      case 'reset':
+        pipeline?.reset();
+        break;
     }
   } catch (err) {
     post({ type: 'error', message: (err as Error).message });

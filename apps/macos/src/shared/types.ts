@@ -57,7 +57,9 @@ export type ElectronApi = AppBridge & {
 export type MainToAsr =
   | { type: 'init'; modelsDir: string }
   | { type: 'audio'; samples: Float32Array }
-  | { type: 'flush' };
+  | { type: 'flush' }
+  /** 开始新一次录音会话：重置 segment.start 的计时基线（子进程跨会话复用） */
+  | { type: 'reset' };
 
 export type AsrToMain =
   | { type: 'ready' }
