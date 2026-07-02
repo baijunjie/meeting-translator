@@ -133,12 +133,17 @@ export function modelFileList(): string[] {
   return requiredAsrFiles();
 }
 
+// 无进展看门狗超时：连续这么久没收到任何新字节即判定连接停滞并中止本次下载。
+// 「无进展超时」而非「总时长超时」——大文件慢速下载合法，只在字节流真正停滞时触发。
+const STALL_TIMEOUT_MS = 30_000;
+
 /**
  * 流式下载单个文件并写入 Cache Storage：res.body.tee() 双分支，一支直接作为
  * Response 体交给 cache.put 边下边落缓存，另一支只统计字节数回吐单文件进度——
  * 全程不在 JS 堆里聚合完整文件，内存峰值与文件大小无关（网络是瓶颈，两支都按
  * 网络速率消费，tee 的内部缓冲不会堆积）。
  * cache.put 的体流中途出错时按规范不会写入条目，失败不会留下半截缓存。
+ * 字节流停滞（TCP 静默断开、无 RST）时由无进展看门狗 abort，交给失败→重试 UI 接管。
  */
 async function downloadIntoCache(
   cache: Cache,
@@ -146,43 +151,71 @@ async function downloadIntoCache(
   file: AsrModelFile,
   onFileProgress: (loaded: number) => void,
 ): Promise<void> {
-  const res = await fetch(resolveUrl(file), { mode: 'cors', redirect: 'follow' });
-  if (!res.ok) {
-    throw new Error(`下载失败 ${file.filename}: HTTP ${res.status}`);
-  }
-
-  // 无法读 body 流：退化为整体读取，进度按 approxBytes 兜底。
-  if (!res.body) {
-    const buf = await res.arrayBuffer();
-    await cache.put(key, new Response(buf));
-    onFileProgress(file.approxBytes);
-    return;
-  }
-
-  const [cacheStream, progressStream] = res.body.tee();
-
-  // 进度分支：只计数、不保留数据。
-  const trackProgress = async (): Promise<void> => {
-    const reader = progressStream.getReader();
-    let received = 0;
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      if (value) {
-        received += value.length;
-        // 单文件进度用真实已收字节，但封顶到 approxBytes，避免超过分母里该文件的份额。
-        onFileProgress(Math.min(received, file.approxBytes));
-      }
-    }
+  const controller = new AbortController();
+  let stalled = false;
+  let watchdog: ReturnType<typeof setTimeout> | undefined;
+  const armWatchdog = (): void => {
+    if (watchdog !== undefined) clearTimeout(watchdog);
+    watchdog = setTimeout(() => {
+      stalled = true;
+      controller.abort();
+    }, STALL_TIMEOUT_MS);
   };
 
+  armWatchdog(); // 连接/响应头阶段也受同一 signal 约束
   try {
-    await Promise.all([cache.put(key, new Response(cacheStream)), trackProgress()]);
+    const res = await fetch(resolveUrl(file), {
+      mode: 'cors',
+      redirect: 'follow',
+      signal: controller.signal,
+    });
+    if (!res.ok) {
+      throw new Error(`下载失败 ${file.filename}: HTTP ${res.status}`);
+    }
+
+    // 无法读 body 流：退化为整体读取，进度按 approxBytes 兜底。
+    // 无逐块事件可喂看门狗，先解除以免大文件整体读取被误判停滞。
+    if (!res.body) {
+      clearTimeout(watchdog);
+      watchdog = undefined;
+      const buf = await res.arrayBuffer();
+      await cache.put(key, new Response(buf));
+      onFileProgress(file.approxBytes);
+      return;
+    }
+
+    const [cacheStream, progressStream] = res.body.tee();
+
+    // 进度分支：只计数、不保留数据；收到新字节即重置无进展计时。
+    const trackProgress = async (): Promise<void> => {
+      const reader = progressStream.getReader();
+      let received = 0;
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        if (value) {
+          received += value.length;
+          armWatchdog();
+          // 单文件进度用真实已收字节，但封顶到 approxBytes，避免超过分母里该文件的份额。
+          onFileProgress(Math.min(received, file.approxBytes));
+        }
+      }
+    };
+
+    try {
+      await Promise.all([cache.put(key, new Response(cacheStream)), trackProgress()]);
+    } catch (err) {
+      // 任一支失败（网络中断/写缓存失败/看门狗 abort）：取消两支释放资源（已被锁定的流返回
+      // rejected promise，allSettled 吞掉即可），并兜底删除可能存在的缓存条目。
+      await Promise.allSettled([cacheStream.cancel(), progressStream.cancel()]);
+      await cache.delete(key).catch(() => undefined);
+      throw err;
+    }
   } catch (err) {
-    // 任一支失败（网络中断/写缓存失败）：取消两支释放资源（已被锁定的流返回
-    // rejected promise，allSettled 吞掉即可），并兜底删除可能存在的缓存条目。
-    await Promise.allSettled([cacheStream.cancel(), progressStream.cancel()]);
-    await cache.delete(key).catch(() => undefined);
+    // 看门狗触发的 abort 转成明确的停滞错误，交给上层失败→重试 UI 接管。
+    if (stalled) throw new Error(`下载停滞，请检查网络后重试: ${file.filename}`);
     throw err;
+  } finally {
+    if (watchdog !== undefined) clearTimeout(watchdog);
   }
 }
