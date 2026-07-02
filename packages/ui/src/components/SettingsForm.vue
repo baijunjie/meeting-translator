@@ -27,7 +27,7 @@ export interface SettingsFormData {
 
 <script setup lang="ts">
 import { computed, ref, watch, watchEffect } from 'vue';
-import { NSelect, NInput, NAutoComplete, NFormItem, NAlert, NButton } from 'naive-ui';
+import { NSelect, NInput, NAutoComplete, NFormItem, NAlert, NButton, type SelectOption } from 'naive-ui';
 import { useI18n } from 'vue-i18n';
 import { bridge } from '../bridge';
 import { previewLocale, previewTheme, applyFontSize } from '../composables/useSettings';
@@ -194,15 +194,22 @@ const providerPresets: ProviderPreset[] = [
 
 const normalizeUrl = (u: string): string => u.trim().replace(/\/+$/, '').toLowerCase();
 
-// Base URL 候选：按输入过滤（匹配服务商名或 URL），无匹配则回退全部。value=URL、label 带服务商名。
+// Base URL 候选：按输入过滤（匹配服务商名或 URL），无匹配则回退全部。
+// NAutoComplete 选中时把 label 填入输入框，故 label 必须是纯 URL（否则品牌名会进
+// baseURL，且模型联动因匹配不到服务商而失效）；服务商名放自定义字段，经 render-label 仅在下拉展示。
 const baseUrlOptions = computed(() => {
   const q = props.form.cloud.baseURL.trim().toLowerCase();
   const matched = providerPresets.filter(
     (p) => !q || p.name.toLowerCase().includes(q) || p.baseURL.toLowerCase().includes(q),
   );
   const list = matched.length ? matched : providerPresets;
-  return list.map((p) => ({ label: `${p.name} · ${p.baseURL}`, value: p.baseURL }));
+  return list.map((p) => ({ label: p.baseURL, value: p.baseURL, provider: p.name }));
 });
+
+// 下拉项显示「服务商 · URL」；选中填入的仍是纯 URL
+function renderBaseUrlLabel(option: SelectOption): string {
+  return `${option.provider as string} · ${option.label as string}`;
+}
 
 // 模型候选：随当前 Base URL 联动到对应服务商的模型；未匹配到服务商则用全部预设模型去重兜底。
 const modelOptions = computed(() => {
@@ -247,6 +254,7 @@ watch(() => props.form.fontSize, (v) => applyFontSize(v));
         <n-auto-complete
           v-model:value="form.cloud.baseURL"
           :options="baseUrlOptions"
+          :render-label="renderBaseUrlLabel"
           :get-show="() => true"
           clearable
           placeholder="https://api.openai.com/v1"
