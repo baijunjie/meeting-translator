@@ -12,6 +12,13 @@ const messages = {
       save: 'Save',
       title: 'Archives',
     },
+    errors: {
+      'asr-crashed': 'Speech recognition stopped unexpectedly',
+      'asr-init-failed': 'Failed to load the speech recognizer',
+      'audio-capture-failed': 'Audio capture unavailable',
+      'audio-interrupted': 'Recording was interrupted by the system',
+      'mic-permission': 'Microphone access denied',
+    },
     main: {
       appTitle: 'Realtime Translator',
       archive: 'Archive',
@@ -107,6 +114,13 @@ const messages = {
       nameLabel: '名前',
       save: '保存',
       title: 'アーカイブ',
+    },
+    errors: {
+      'asr-crashed': '音声認識が予期せず停止しました',
+      'asr-init-failed': '音声認識エンジンの読み込みに失敗しました',
+      'audio-capture-failed': '音声入力を利用できません',
+      'audio-interrupted': 'システムにより録音が中断されました',
+      'mic-permission': 'マイクへのアクセスが拒否されました',
     },
     main: {
       appTitle: 'リアルタイム翻訳',
@@ -204,6 +218,13 @@ const messages = {
       save: '저장',
       title: '보관 기록',
     },
+    errors: {
+      'asr-crashed': '음성 인식이 예기치 않게 중지되었습니다',
+      'asr-init-failed': '음성 인식 엔진 로딩에 실패했습니다',
+      'audio-capture-failed': '오디오 입력을 사용할 수 없습니다',
+      'audio-interrupted': '시스템에 의해 녹음이 중단되었습니다',
+      'mic-permission': '마이크 접근이 거부되었습니다',
+    },
     main: {
       appTitle: '실시간 번역',
       archive: '보관',
@@ -298,6 +319,13 @@ const messages = {
       save: '保存',
       title: '归档记录',
     },
+    errors: {
+      'asr-crashed': '识别引擎异常退出',
+      'asr-init-failed': '识别引擎加载失败',
+      'audio-capture-failed': '无法建立音频采集（设备不可用或被占用）',
+      'audio-interrupted': '录音被系统中断',
+      'mic-permission': '未获得麦克风权限',
+    },
     main: {
       appTitle: '实时翻译',
       archive: '归档',
@@ -389,6 +417,13 @@ const messages = {
       nameLabel: '名稱',
       save: '儲存',
       title: '封存記錄',
+    },
+    errors: {
+      'asr-crashed': '辨識引擎異常結束',
+      'asr-init-failed': '辨識引擎載入失敗',
+      'audio-capture-failed': '無法建立音訊擷取（裝置不可用或被佔用）',
+      'audio-interrupted': '錄音被系統中斷',
+      'mic-permission': '未取得麥克風權限',
     },
     main: {
       appTitle: '即時翻譯',

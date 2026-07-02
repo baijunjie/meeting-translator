@@ -32,14 +32,29 @@ export interface PartialPayload {
   text: string;
 }
 
+/**
+ * 管线错误的稳定错误码：宿主上报错误时随 error 原文一并携带，UI 据此显示
+ * 本地化文案；无码或未知码时回退 error 原文（宿主自由文本，可能非界面语言）。
+ */
+export type PipelineErrorCode =
+  | 'mic-permission' // 麦克风权限被拒/未授予
+  | 'audio-capture-failed' // 音频采集链路建立失败（无输入设备/被占用等）
+  | 'audio-interrupted' // 系统音频中断（媒体服务重置等）
+  | 'asr-init-failed' // 识别引擎初始化/模型加载失败
+  | 'asr-crashed'; // 识别进程/引擎异常退出
+
 export interface StatusPayload {
   state: 'loading' | 'running' | 'error' | 'stopped';
   error?: string;
+  /** 错误码（state 为 error 时可选携带） */
+  code?: PipelineErrorCode;
 }
 
 export interface StartResult {
   ok: boolean;
   error?: string;
+  /** 错误码（ok 为 false 时可选携带） */
+  code?: PipelineErrorCode;
 }
 
 /** 翻译模型单个文件的下载进度（模型由多个文件组成，供 UI 逐文件展示独立进度条） */

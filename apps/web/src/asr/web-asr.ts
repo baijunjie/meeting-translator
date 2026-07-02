@@ -15,7 +15,7 @@
 //  - 回吐：Worker 的 partial/segment 消息转成 @rt/core 的 PartialPayload/SegmentPayload，
 //    经 onPartial/onSegment 回调上抛。
 
-import type { SegmentPayload, PartialPayload, StatusPayload } from '@rt/core';
+import type { SegmentPayload, PartialPayload, StatusPayload, PipelineErrorCode } from '@rt/core';
 import { areModelsCached, ensureModelsCached, readCachedModels } from './model-store';
 import type { ToWorker, FromWorker } from './worker-protocol';
 
@@ -31,6 +31,8 @@ export interface WebAsrCallbacks {
 export interface WebAsrStartResult {
   ok: boolean;
   error?: string;
+  /** 错误码（ok 为 false 时可选携带），与 @rt/core StartResult.code 同义 */
+  code?: PipelineErrorCode;
 }
 
 /**
@@ -120,7 +122,12 @@ export class WebAsr {
           case 'error':
             this.workerFailed = true;
             if (!this.workerReady) reject(new Error(msg.error));
-            this.cbs.onStatus?.({ state: 'error', error: msg.error });
+            this.cbs.onStatus?.({
+              state: 'error',
+              error: msg.error,
+              // 就绪前失败 = 引擎初始化问题；就绪后失败 = 运行中异常
+              code: this.workerReady ? 'asr-crashed' : 'asr-init-failed',
+            });
             break;
           // 'flushed' / 'stopped' 由 stop() 里的临时监听消费，这里无需处理。
           default:
@@ -247,8 +254,17 @@ export class WebAsr {
       // 直接调 stopInternal 而非公有 stop：已在操作链内，再走单飞会自等造成死锁。
       await this.stopInternal();
       const msg = e instanceof Error ? e.message : String(e);
-      this.cbs.onStatus?.({ state: 'error', error: msg });
-      return { ok: false, error: msg };
+      // 按异常来源分类错误码：getUserMedia 的权限拒绝 / 设备不可用有标准 DOMException 名，
+      // 其余（模型读取、worker 构建）归为引擎初始化失败。
+      const name = e instanceof DOMException ? e.name : '';
+      const code =
+        name === 'NotAllowedError' || name === 'PermissionDeniedError'
+          ? ('mic-permission' as const)
+          : name === 'NotFoundError' || name === 'NotReadableError' || name === 'OverconstrainedError'
+            ? ('audio-capture-failed' as const)
+            : ('asr-init-failed' as const);
+      this.cbs.onStatus?.({ state: 'error', error: msg, code });
+      return { ok: false, error: msg, code };
     }
   }
 

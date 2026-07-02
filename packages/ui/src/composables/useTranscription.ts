@@ -1,5 +1,5 @@
 import { nextTick, reactive, ref } from 'vue';
-import type { TranslationFileProgress } from '@rt/core';
+import type { PipelineErrorCode, TranslationFileProgress } from '@rt/core';
 import { fmtClock } from '../utils/datetime';
 import { bridge } from '../bridge';
 
@@ -18,8 +18,9 @@ export const recording = ref(false);
 
 // 软件未就绪：加载 ASR 模型中（录音管线就绪前）
 export const modelLoading = ref(false);
-// 录音/管线错误（原始文案）
+// 录音/管线错误：原始文案（宿主自由文本，可能非界面语言）+ 稳定错误码（有码时 UI 按码取本地化文案）
 export const errorText = ref('');
+export const errorCode = ref<PipelineErrorCode | null>(null);
 
 // 翻译模型状态（独立，显示在翻译开关旁，不影响录音）
 export const translationLoading = ref(false);
@@ -87,9 +88,11 @@ export function registerTranscriptionListeners(): void {
     } else if (s.state === 'running') {
       modelLoading.value = false;
       errorText.value = '';
+      errorCode.value = null;
     } else if (s.state === 'error') {
       modelLoading.value = false;
       errorText.value = s.error ?? 'Error';
+      errorCode.value = s.code ?? null;
       // 经守卫收停：stopPipeline 在途期间用户点录音会被 toggleBusy 挡住，避免 start/stop 交错
       if (recording.value) {
         toggleBusy = true;
@@ -131,10 +134,12 @@ export function registerTranscriptionListeners(): void {
 
 export async function startRecording(): Promise<void> {
   errorText.value = '';
+  errorCode.value = null;
   // 桥接内部负责音频采集（macOS 渲染层用 AudioWorklet，iOS 原生采麦），UI 不感知平台细节。
   const result = await bridge().startPipeline();
   if (!result.ok) {
     errorText.value = result.error ?? 'Error';
+    errorCode.value = result.code ?? null;
     return;
   }
   // 计时基线在管线确认启动后才取：segment.start 的 0 点是管线启动之后，

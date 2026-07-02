@@ -135,8 +135,8 @@ public class RealtimeAsrPlugin: CAPPlugin, CAPBridgedPlugin {
       guard let self = self else { return }
       guard granted else {
         let msg = "microphone permission denied"
-        self.notifyListeners("status", data: ["state": "error", "error": msg])
-        call.resolve(["ok": false, "error": msg])
+        self.notifyListeners("status", data: ["state": "error", "error": msg, "code": "mic-permission"])
+        call.resolve(["ok": false, "error": msg, "code": "mic-permission"])
         return
       }
       // Build recognizer/VAD + open the mic on the ASR queue (model load can take seconds).
@@ -158,8 +158,8 @@ public class RealtimeAsrPlugin: CAPPlugin, CAPBridgedPlugin {
           call.resolve(["ok": true])
         } catch {
           let msg = error.localizedDescription
-          self.notifyListeners("status", data: ["state": "error", "error": msg])
-          call.resolve(["ok": false, "error": msg])
+          self.notifyListeners("status", data: ["state": "error", "error": msg, "code": "asr-init-failed"])
+          call.resolve(["ok": false, "error": msg, "code": "asr-init-failed"])
         }
       }
     }
@@ -222,7 +222,7 @@ public class RealtimeAsrPlugin: CAPPlugin, CAPBridgedPlugin {
       self.isRunning = false
       self.notifyListeners("partial", data: ["text": ""])
       if let reason = reason {
-        self.notifyListeners("status", data: ["state": "error", "error": reason])
+        self.notifyListeners("status", data: ["state": "error", "error": reason, "code": "audio-interrupted"])
       } else {
         self.notifyListeners("status", data: ["state": "stopped"])
       }

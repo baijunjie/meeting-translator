@@ -227,7 +227,7 @@ function startAsrChild(): Promise<void> {
           sendToRenderer('pipeline:partial', m.payload);
           break;
         case 'error':
-          sendToRenderer('pipeline:status', { state: 'error', error: m.message });
+          sendToRenderer('pipeline:status', { state: 'error', error: m.message, code: 'asr-init-failed' });
           if (!settled) {
             // 初始化阶段就出错：销毁子进程，让 exit 清空引用，下次 start 可重新 fork 恢复
             settled = true;
@@ -242,7 +242,7 @@ function startAsrChild(): Promise<void> {
       asrReady = null;
       sessionActive = false;
       if (code !== 0) {
-        sendToRenderer('pipeline:status', { state: 'error', error: `识别进程异常退出 (${code})` });
+        sendToRenderer('pipeline:status', { state: 'error', error: `识别进程异常退出 (${code})`, code: 'asr-crashed' });
         if (!settled) {
           settled = true;
           reject(new Error(`识别进程退出 ${code}`));
@@ -265,7 +265,7 @@ ipcMain.handle('pipeline:start', async (): Promise<StartResult> => {
   if (process.platform === 'darwin') {
     const granted = await systemPreferences.askForMediaAccess('microphone');
     if (!granted) {
-      return { ok: false, error: '未获得麦克风权限，请在系统设置中授权' };
+      return { ok: false, error: '未获得麦克风权限，请在系统设置中授权', code: 'mic-permission' };
     }
   }
 

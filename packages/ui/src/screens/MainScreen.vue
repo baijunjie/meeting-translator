@@ -11,6 +11,7 @@ import {
   recording,
   modelLoading,
   errorText,
+  errorCode,
   toggleRecording,
   clearTranscript,
   translationLoading,
@@ -75,6 +76,11 @@ async function confirmArchive(): Promise<void> {
 // 是否开启翻译：现由设置里的「翻译方式」决定（选了模型即启用），主页不再有独立开关。
 // 仍需此值让转写列表决定是否显示「翻译中」等待动画。
 const translateOn = computed<boolean>(() => settings.value?.translation.enabled ?? false);
+
+// 错误显示：有稳定错误码时用本地化文案，无码回退宿主原文（自由文本，可能非界面语言）
+const errorDisplay = computed(() =>
+  errorCode.value ? t(`errors.${errorCode.value}`) : errorText.value,
+);
 
 // 强制更新入口仅在桥接提供该能力时显示（目前只有 Web PWA 实现，原生端无此项）。
 // setup 时 bridge 已由 mountApp 注入，可同步判定。
@@ -177,7 +183,7 @@ function openMicSettings(): void {
       class="flex items-center gap-3.5 border-b border-neutral-200 px-[18px] py-3 dark:border-[#3a3b44]"
     >
       <span class="text-[15px] font-semibold">{{ t('main.appTitle') }}</span>
-      <span v-if="errorText" class="text-xs text-red-500">{{ errorText }}</span>
+      <span v-if="errorText" class="text-xs text-red-500">{{ errorDisplay }}</span>
 
       <div class="flex-1" />
 
