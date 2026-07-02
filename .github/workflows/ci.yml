@@ -1,0 +1,45 @@
+# 质量门禁：core 单元测试 + 三端 type-check。
+# 不下载 Electron 二进制（ELECTRON_SKIP_BINARY_DOWNLOAD=1）：类型检查只需要包内的
+# TS 类型声明，跳过 ~100MB 下载让 CI 更快、更稳。
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# 同一分支/PR 只保留最新一次运行，新触发取消进行中的。
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    env:
+      ELECTRON_SKIP_BINARY_DOWNLOAD: 1
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Unit tests (@rt/core)
+        run: pnpm --filter @rt/core test
+
+      - name: Type-check (@rt/macos)
+        run: pnpm --filter @rt/macos type-check
+
+      - name: Type-check (@rt/web)
+        run: pnpm --filter @rt/web type-check
+
+      - name: Type-check (@rt/ios)
+        run: pnpm --filter @rt/ios type-check
