@@ -42,11 +42,25 @@ export interface StartResult {
   error?: string;
 }
 
+/** 翻译模型单个文件的下载进度（模型由多个文件组成，供 UI 逐文件展示独立进度条） */
+export interface TranslationFileProgress {
+  /** 文件相对路径（如 onnx/encoder_model_quantized.onnx） */
+  file: string;
+  /** 该文件的 0~1 进度 */
+  progress: number;
+  /** 已下载字节 */
+  loaded: number;
+  /** 总字节 */
+  total: number;
+}
+
 /** 翻译模型的加载状态（首次需联网下载约 600MB） */
 export interface TranslationStatusPayload {
   state: 'loading' | 'ready' | 'error';
-  /** 0~1 下载进度（若有） */
+  /** 0~1 总进度（按全部文件的字节聚合，若有） */
   progress?: number;
+  /** 各文件独立进度（若有）；文件按发现顺序排列 */
+  files?: TranslationFileProgress[];
   error?: string;
 }
 
@@ -95,6 +109,12 @@ export type ThemePref = 'light' | 'dark' | 'system';
 
 /** 麦克风权限状态（macOS systemPreferences.getMediaAccessStatus） */
 export type MicPermission = 'granted' | 'denied' | 'restricted' | 'not-determined' | 'unknown';
+
+/**
+ * 网络连接类型，用于蜂窝网络下下载模型（ASR 约 230MB / 本地翻译约 630MB）前的确认。
+ * unknown 表示平台无法判断连接类型，按「不打扰」处理（不弹确认、维持现状直接下载）。
+ */
+export type NetworkType = 'wifi' | 'cellular' | 'unknown';
 
 /** 归档里的一行对话 */
 export interface ArchiveLine {

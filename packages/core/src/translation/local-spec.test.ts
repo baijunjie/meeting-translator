@@ -1,6 +1,29 @@
-// planTranslation / normalizeZh 的单元测试：三端共用的「要不要翻、怎么翻」判定矩阵。
+// planTranslation / normalizeZh / hasAllWeightFiles 的单元测试：三端共用的判定逻辑。
 import { describe, expect, it } from 'vitest';
-import { M2M100_SPEC, normalizeZh, planTranslation } from './local-spec';
+import { M2M100_SPEC, hasAllWeightFiles, normalizeZh, planTranslation } from './local-spec';
+
+describe('hasAllWeightFiles 缓存完整性判据', () => {
+  it('encoder + decoder 权重齐全（q8 带 _quantized 后缀）→ 完整', () => {
+    const cached = [
+      'https://huggingface.co/Xenova/m2m100_418M/resolve/main/onnx/encoder_model_quantized.onnx',
+      'https://huggingface.co/Xenova/m2m100_418M/resolve/main/onnx/decoder_model_merged_quantized.onnx',
+      'https://huggingface.co/Xenova/m2m100_418M/resolve/main/tokenizer.json',
+    ];
+    expect(hasAllWeightFiles(M2M100_SPEC, cached)).toBe(true);
+  });
+
+  it('只剩 encoder（decoder 被逐出）→ 不完整', () => {
+    expect(hasAllWeightFiles(M2M100_SPEC, ['encoder_model_quantized.onnx'])).toBe(false);
+  });
+
+  it('只有非权重文件（tokenizer/config）→ 不完整', () => {
+    expect(hasAllWeightFiles(M2M100_SPEC, ['tokenizer.json', 'config.json'])).toBe(false);
+  });
+
+  it('空列表 → 不完整', () => {
+    expect(hasAllWeightFiles(M2M100_SPEC, [])).toBe(false);
+  });
+});
 
 describe('normalizeZh 简繁转换', () => {
   it('简体 → 繁體', () => {

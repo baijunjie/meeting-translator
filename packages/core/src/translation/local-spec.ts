@@ -32,10 +32,20 @@ export interface LocalModelSpec {
   modelId: string;
   /** 量化档位 */
   dtype: 'q8';
+  /**
+   * 缓存完整性判据：每个特征串须命中至少一个已缓存的 .onnx 权重文件（见 hasAllWeightFiles）。
+   * 缓存按文件粒度写入/逐出，只查目录或任一文件存在会把部分缺失误判为已就绪。
+   */
+  weightFiles: string[];
   /** app 语言（含 ASR 源码 yue）→ 处理方式；未列出的语言回退到 fallbackLang */
   langs: Record<string, LangEntry>;
   /** 未知语言的回退（通常英语） */
   fallbackLang: string;
+}
+
+/** 已缓存文件名/URL 列表是否覆盖 spec 的全部权重文件（每个特征串命中至少一个 .onnx） */
+export function hasAllWeightFiles(spec: LocalModelSpec, cached: string[]): boolean {
+  return spec.weightFiles.every((w) => cached.some((f) => f.includes(w) && f.includes('.onnx')));
 }
 
 // M2M100-418M（MIT，轻量）。不区分简/繁：繁體目标翻成中文后用脚本转换。
@@ -43,6 +53,8 @@ export const M2M100_SPEC: LocalModelSpec = {
   id: 'm2m100',
   modelId: 'Xenova/m2m100_418M',
   dtype: 'q8',
+  // seq2seq 双权重：encoder + merged decoder（q8 档文件名带 _quantized 后缀，用特征串匹配）
+  weightFiles: ['encoder_model', 'decoder_model'],
   fallbackLang: 'en',
   langs: {
     // zh / zh-Hant 同为中文（lang: 'zh'），只是简繁字形不同——彼此「同语言」，不经模型只做字形转换。
