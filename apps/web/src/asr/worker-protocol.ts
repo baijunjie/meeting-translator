@@ -7,9 +7,11 @@ export type ToWorker =
   | { type: 'init'; models: Array<{ name: string; bytes: Uint8Array }>; sherpaBaseUrl: string }
   // 一帧 16kHz 单声道 PCM（Float32）。
   | { type: 'frame'; samples: Float32Array }
-  // 录音结束：把未闭合的语音段定稿。
+  // 录音结束：把未闭合的语音段定稿，处理完回 'flushed'。
   | { type: 'flush' }
-  // 停止并释放（销毁 VAD/recognizer，可重新 init）。
+  // 开始新一次录音会话：重置 segment.start 的计时基线（worker 跨会话复用，模型常驻）。
+  | { type: 'reset' }
+  // 停止并释放（销毁 VAD/recognizer，可重新 init）。仅异常路径使用；正常停止靠 flush + 复用。
   | { type: 'stop' };
 
 /** Worker → 主线程。 */
@@ -22,5 +24,7 @@ export type FromWorker =
   | { type: 'segment'; id: number; text: string; lang: string; start: number; duration: number }
   // 错误（init 失败 / 解码异常等）。
   | { type: 'error'; error: string }
-  // 已处理完 flush 并释放完毕（主线程据此再 terminate，避免提前杀掉 worker 丢掉最后一段）。
+  // flush 已处理完（其定稿的最后一段 segment 先于本回执到达），主线程据此结束停止流程。
+  | { type: 'flushed' }
+  // stop 已处理、资源已释放。
   | { type: 'stopped' };

@@ -1,128 +1,95 @@
-// sherpa-onnx WASM 识别 Worker（经典 Web Worker，非 ESM）。
+// sherpa-onnx WASM 识别 Worker（module worker）。
 //
-// 为什么是经典 Worker：Emscripten 的胶水 (sherpa-onnx-wasm-main-vad-asr.js) 与两个包装器
-// (sherpa-onnx-vad.js / sherpa-onnx-asr.js) 都是 UMD/全局脚本，需用 importScripts 加载，
-// 不能走 ESM import。Vite 用 `new Worker(url, { type: 'classic' })` 起它（见 web-asr.ts）。
+// 切段策略与文本清理在 @rt/core 的 TranscriptionPipeline（与 macOS 共用同一实现），
+// 这里只负责平台绑定的部分：加载 Emscripten 胶水、把模型字节写入 WASM FS、
+// 用 createVad/OfflineRecognizer 实现 core 的 AsrInferenceEngine，以及消息协议。
+//
+// 为什么是 module worker + fetch/eval：worker 需要 import @rt/core，而 Vite 在 dev
+// 模式不打包 classic worker（import 语句会原样送达浏览器、直接 SyntaxError），
+// module worker 则 dev（原生 ESM）与 build（打包）都成立。module worker 没有
+// importScripts，胶水与两个包装器又是「顶层声明共享全局」的 classic 脚本，故用
+// fetch + 间接 eval 在全局作用域执行，并在 eval 末尾把所需符号显式挂到 self
+// （兼容 function/class/const 任意声明形式）。
 //
 // 运行模型：Silero VAD（512 采样窗口@16k）+ SenseVoice 离线识别（int8）。
-// 单线程 WASM 构建 → 无需 COOP/COEP。模型由主线程下载/缓存后，以字节数组传进来，
-// 这里 Module.FS.writeFile 写入 MEMFS，再让 recognizer/VAD 指向这些扁平文件名。
+// 单线程 WASM 构建 → 无需 COOP/COEP。模型由主线程下载/缓存后以字节数组传进来。
+// worker 跨录音会话复用（stop 只 flush 不销毁）：模型常驻 MEMFS，再次开始录音
+// 只需 reset 计时基线，免去重读 ~230MB 模型与重新构图预热。
 //
-// 切段策略移植自 apps/macos 的 TranscriptionPipeline：
-//  - 维护历史缓冲（最多 60s），按 512 采样窗口喂 VAD；
-//  - 用 vad.isDetected() 自行切段（静音→语音开段、语音→静音定稿、超长兜底在能量最低点断句）；
-//  - 段内周期性做部分识别（partial），自适应降频。
-//
-// 注意：本文件被 Vite 当作 worker 入口打包；它不参与主 bundle，用 ts-nocheck 避开
-// DOM/ESM 与 Worker 全局 + 动态注入的 sherpa 全局（Module/createVad/OfflineRecognizer/
-// CircularBuffer）之间的类型冲突。协议字段见 ./worker-protocol.ts。
+// 用 ts-nocheck 避开 Worker 全局 + 动态注入的 sherpa 全局（Module/createVad/
+// OfflineRecognizer）之间的类型冲突。协议字段见 ./worker-protocol.ts。
 // @ts-nocheck
 /// <reference lib="webworker" />
-
-// ===== 常量（与 apps/macos asr-process 对齐） =====
-const SAMPLE_RATE = 16000;
-const VAD_WINDOW_SIZE = 512;
-const MAX_HISTORY_SECONDS = 60;
-const MIN_SILENCE_SECONDS = 0.35;
-const MAX_SEGMENT_SECONDS = 7;
-const SPLIT_SEARCH_SECONDS = 2;
-const MIN_SEGMENT_SECONDS = 4;
-const PARTIAL_INTERVAL_SECONDS = 0.6;
-const PARTIAL_LOOKBACK_SECONDS = 0.6;
-const PARTIAL_MAX_WINDOW_SECONDS = 8;
+import { TranscriptionPipeline, SAMPLE_RATE, VAD_WINDOW_SIZE, MIN_SILENCE_SECONDS } from '@rt/core';
 
 // SenseVoice VAD 参数（句首不截断：偏低阈值更早进入语音态）。
 const VAD_THRESHOLD = 0.35;
 const VAD_MIN_SPEECH = 0.25;
 
-// 文本清理（CJK 去空格 + 折叠复读）。
-const REPEAT_MIN = 4;
-const REPEAT_KEEP = 2;
-const REPEAT_MAX_UNIT = 4;
-const CJK = '\\u3040-\\u30ff\\u3400-\\u9fff\\uf900-\\ufaff\\uff66-\\uff9f';
-const CJK_SPACE_RE = new RegExp(`([${CJK}])\\s+(?=[${CJK}])`, 'g');
-
-function stripCjkSpaces(text) {
-  return text.replace(CJK_SPACE_RE, '$1');
-}
-function gramEqual(chars, a, b, unit) {
-  for (let k = 0; k < unit; k++) {
-    if (chars[a + k] !== chars[b + k]) return false;
-  }
-  return true;
-}
-function collapseRepeats(text) {
-  let chars = Array.from(text);
-  for (let unit = 1; unit <= REPEAT_MAX_UNIT; unit++) {
-    if (chars.length < unit * REPEAT_MIN) continue;
-    const out = [];
-    let i = 0;
-    while (i < chars.length) {
-      if (i + unit > chars.length) {
-        out.push(chars[i]);
-        i++;
-        continue;
-      }
-      let count = 1;
-      let j = i + unit;
-      while (j + unit <= chars.length && gramEqual(chars, i, j, unit)) {
-        count++;
-        j += unit;
-      }
-      if (count >= REPEAT_MIN) {
-        for (let k = 0; k < REPEAT_KEEP * unit; k++) out.push(chars[i + k]);
-        i = j;
-      } else {
-        out.push(chars[i]);
-        i++;
-      }
-    }
-    chars = out;
-  }
-  return chars.join('');
-}
-function cleanAsrText(text) {
-  return collapseRepeats(stripCjkSpaces(text.trim()));
-}
-
-// ===== 全局：sherpa 胶水注入的对象（importScripts 后可用） =====
-// 不要在此声明 `let Module`：Emscripten 胶水在 worker 全局用 `var Module` 声明，
-// 与 lexical 的 let/const 同名会报 "Identifier 'Module' has already been declared"。
-// 统一用 self.Module 引用胶水模块（胶水会复用我们预设到 self.Module 的配置对象）。
 let vad = null;
 let recognizer = null;
 let pipeline = null;
 let frameQueue = []; // init 完成前先暂存帧
 
 function post(msg) {
-  // segment/partial 等小对象，直接 postMessage。
   self.postMessage(msg);
 }
 
-// ===== 识别管线（移植自 macOS TranscriptionPipeline） =====
-class TranscriptionPipeline {
-  constructor() {
-    this.pending = new Float32Array(0);
-    this.historyChunks = [];
-    this.totalSamples = 0;
-    this.segmentId = 0;
-    this.speechActive = false;
-    this.segStart = 0;
-    this.speechEnd = 0;
-    this.partialFloor = 0;
-    this.lastPartialAt = 0;
-    this.partialGap = Math.round(PARTIAL_INTERVAL_SECONDS * SAMPLE_RATE);
+/**
+ * 加载 classic 全局脚本：fetch 源码后间接 eval（全局作用域执行，var/function 顶层
+ * 声明直接成为 worker 全局），末尾追加 self.<name> = <name> 把 exportNames 显式挂到
+ * 全局——覆盖 class/const 等词法声明在 eval 结束后即被丢弃的情形。
+ */
+async function importClassicScript(url, exportNames) {
+  const res = await fetch(url);
+  if (!res.ok) {
+    throw new Error(`加载失败 ${url}: HTTP ${res.status}`);
+  }
+  const code = await res.text();
+  const exports = exportNames
+    .map((n) => `if (typeof ${n} !== 'undefined') self.${n} = ${n};`)
+    .join('\n');
+  (0, eval)(`${code}\n;${exports}\n//# sourceURL=${url}`);
+}
 
-    // VAD（Silero）：模型已以扁平名 silero_vad.onnx 写入 FS。
-    vad = createVad(self.Module, {
+/** 加载 sherpa 胶水（包装器先、Emscripten 胶水后），resolve 于 WASM 运行时就绪。 */
+async function loadGlue(baseUrl) {
+  // 预设配置对象：胶水的 `var Module = typeof Module != "undefined" ? Module : {}` 会复用它。
+  const M = {
+    locateFile: (path) => baseUrl + path, // 让 .wasm/.data 从 sherpa/ 目录加载
+  };
+  const ready = new Promise((resolve) => {
+    M.onRuntimeInitialized = () => resolve();
+  });
+  self.Module = M;
+  await importClassicScript(baseUrl + 'sherpa-onnx-vad.js', ['createVad', 'CircularBuffer']);
+  await importClassicScript(baseUrl + 'sherpa-onnx-asr.js', [
+    'OfflineRecognizer',
+    'createOnlineRecognizer',
+  ]);
+  await importClassicScript(baseUrl + 'sherpa-onnx-wasm-main-vad-asr.js', ['Module']);
+  await ready;
+  return self.Module;
+}
+
+// ===== init：加载 WASM 胶水 + 写入模型 + 建引擎与管线 =====
+async function handleInit(msg) {
+  try {
+    const M = await loadGlue(msg.sherpaBaseUrl);
+    // 把模型字节写入 WASM MEMFS（扁平文件名，recognizer/VAD 用 './<name>' 引用）。
+    for (const { name, bytes } of msg.models) {
+      M.FS.writeFile(name, bytes);
+    }
+
+    // VAD（Silero）。maxSpeechDuration 用包装器默认值 20s：切段由 core 管线负责，
+    // 不消费 VAD 内部段队列，无需让 VAD 提前强制断句。
+    vad = self.createVad(self.Module, {
       sileroVad: {
         model: './silero_vad.onnx',
         threshold: VAD_THRESHOLD,
         minSpeechDuration: VAD_MIN_SPEECH,
         minSilenceDuration: MIN_SILENCE_SECONDS,
         windowSize: VAD_WINDOW_SIZE,
-        // maxSpeechDuration 用包装器默认值 20s：我们靠 isDetected() + MAX_SEGMENT_SECONDS 自切段，
-        // 不消费 VAD 内部段队列，故无需让 VAD 提前强制断句（与 apps/macos 行为一致）。
       },
       sampleRate: SAMPLE_RATE,
       numThreads: 1,
@@ -132,7 +99,7 @@ class TranscriptionPipeline {
     });
 
     // SenseVoice 离线识别。tokens.txt 与 model.int8.onnx 已写入 FS（扁平名）。
-    recognizer = new OfflineRecognizer(
+    recognizer = new self.OfflineRecognizer(
       {
         featConfig: { sampleRate: SAMPLE_RATE, featureDim: 80 },
         modelConfig: {
@@ -148,201 +115,37 @@ class TranscriptionPipeline {
       self.Module,
     );
 
+    // core 管线对推理引擎的最小依赖（见 @rt/core AsrInferenceEngine）。
+    const engine = {
+      acceptVadWindow: (samples) => vad.acceptWaveform(samples),
+      isSpeechDetected: () => vad.isDetected(),
+      drainVad: () => {
+        while (!vad.isEmpty()) {
+          vad.pop();
+        }
+      },
+      flushVad: () => vad.flush(),
+      transcribe: (samples) => {
+        const stream = recognizer.createStream();
+        stream.acceptWaveform(SAMPLE_RATE, samples);
+        recognizer.decode(stream);
+        const result = recognizer.getResult(stream);
+        stream.free();
+        return { text: result.text || '', lang: result.lang || '' };
+      },
+    };
+
     // 预热一次（吞掉首次构图开销，避免首段卡顿）。
     try {
-      this.transcribe(new Float32Array(SAMPLE_RATE));
+      engine.transcribe(new Float32Array(SAMPLE_RATE));
     } catch {
       /* ignore warmup error */
     }
-  }
 
-  rememberHistory(samples) {
-    this.historyChunks.push({ start: this.totalSamples, samples: samples.slice() });
-    this.totalSamples += samples.length;
-    const cutoff = this.totalSamples - MAX_HISTORY_SECONDS * SAMPLE_RATE;
-    while (
-      this.historyChunks.length > 0 &&
-      this.historyChunks[0].start + this.historyChunks[0].samples.length < cutoff
-    ) {
-      this.historyChunks.shift();
-    }
-  }
-
-  historySlice(from, to) {
-    const out = new Float32Array(Math.max(0, to - from));
-    for (const chunk of this.historyChunks) {
-      const begin = Math.max(from, chunk.start);
-      const end = Math.min(to, chunk.start + chunk.samples.length);
-      if (begin < end) {
-        out.set(chunk.samples.subarray(begin - chunk.start, end - chunk.start), begin - from);
-      }
-    }
-    return out;
-  }
-
-  acceptWaveform(samples) {
-    this.rememberHistory(samples);
-    const merged = new Float32Array(this.pending.length + samples.length);
-    merged.set(this.pending);
-    merged.set(samples, this.pending.length);
-    let offset = 0;
-    while (offset + VAD_WINDOW_SIZE <= merged.length) {
-      vad.acceptWaveform(merged.subarray(offset, offset + VAD_WINDOW_SIZE));
-      offset += VAD_WINDOW_SIZE;
-    }
-    this.pending = merged.slice(offset);
-    // 我们靠 isDetected() 自切段，不消费 VAD 内部的段队列，但仍要把它排空避免无限增长。
-    while (!vad.isEmpty()) {
-      vad.pop();
-    }
-    this.updateSpeech();
-  }
-
-  flush() {
-    vad.flush();
-    while (!vad.isEmpty()) {
-      vad.pop();
-    }
-    if (this.speechActive) {
-      this.finalizeSegment(this.segStart, this.totalSamples);
-      this.speechActive = false;
-    }
-    post({ type: 'partial', text: '' });
-  }
-
-  updateSpeech() {
-    const detected = vad.isDetected();
-    if (detected) {
-      if (!this.speechActive) {
-        this.speechActive = true;
-        const lookback = Math.round(PARTIAL_LOOKBACK_SECONDS * SAMPLE_RATE);
-        this.segStart = Math.max(this.partialFloor, this.totalSamples - lookback);
-        this.lastPartialAt = 0;
-        this.partialGap = Math.round(PARTIAL_INTERVAL_SECONDS * SAMPLE_RATE);
-      }
-      this.speechEnd = this.totalSamples;
-      if (this.totalSamples - this.segStart >= MAX_SEGMENT_SECONDS * SAMPLE_RATE) {
-        const earliest = this.segStart + Math.round(MIN_SEGMENT_SECONDS * SAMPLE_RATE);
-        const from = Math.max(
-          earliest,
-          this.totalSamples - Math.round(SPLIT_SEARCH_SECONDS * SAMPLE_RATE),
-        );
-        const cut = this.quietestPoint(from, this.totalSamples);
-        this.finalizeSegment(this.segStart, cut);
-        this.segStart = cut;
-      }
-      this.maybePartial();
-    } else if (this.speechActive) {
-      if (this.totalSamples - this.speechEnd >= MIN_SILENCE_SECONDS * SAMPLE_RATE) {
-        this.speechActive = false;
-        this.finalizeSegment(this.segStart, this.speechEnd);
-        post({ type: 'partial', text: '' });
-      }
-    }
-  }
-
-  quietestPoint(from, to) {
-    const win = Math.round(0.1 * SAMPLE_RATE);
-    if (to - from <= win) return to;
-    const audio = this.historySlice(from, to);
-    const hop = Math.round(win / 2);
-    let bestOffset = 0;
-    let bestEnergy = Infinity;
-    for (let i = 0; i + win <= audio.length; i += hop) {
-      let e = 0;
-      for (let k = 0; k < win; k++) e += audio[i + k] * audio[i + k];
-      if (e < bestEnergy) {
-        bestEnergy = e;
-        bestOffset = i;
-      }
-    }
-    return from + bestOffset + Math.floor(win / 2);
-  }
-
-  maybePartial() {
-    if (this.totalSamples - this.lastPartialAt < this.partialGap) return;
-    const maxWindow = PARTIAL_MAX_WINDOW_SECONDS * SAMPLE_RATE;
-    const from = Math.max(this.segStart, this.totalSamples - maxWindow);
-    const audio = this.historySlice(from, this.totalSamples);
-    const t0 = Date.now();
-    const result = this.transcribe(audio);
-    const decodeSamples = ((Date.now() - t0) / 1e3) * SAMPLE_RATE;
-    this.partialGap = Math.max(
-      Math.round(PARTIAL_INTERVAL_SECONDS * SAMPLE_RATE),
-      Math.round(decodeSamples * 1.5),
-    );
-    if (result.text) {
-      post({ type: 'partial', text: result.text });
-    }
-    this.lastPartialAt = this.totalSamples;
-  }
-
-  finalizeSegment(from, to) {
-    if (to <= from) return;
-    this.partialFloor = to;
-    const audio = this.historySlice(from, to);
-    const result = this.transcribe(audio);
-    // 跳过空段/纯标点段（短噪音常识别成「。」）：无确定文本被丢弃，清空识别区，回到「聆听中」
-    if (!result.text || !/[\p{L}\p{N}]/u.test(result.text)) {
-      post({ type: 'partial', text: '' });
-      return;
-    }
-    // 有结果时不在解码前清 partial：整段最终解码独立且较慢，若先清空识别区，会先空、解码完才上屏，
-    // 造成"识别区文字消失→确定句延迟出现"的断档。改由 onSegment 到达时清（UI 收到 segment 即清 partial），
-    // 让识别文字向下淡出与确定句落入同刻发生。
-    post({
-      type: 'segment',
-      id: this.segmentId++,
-      text: result.text,
-      lang: result.lang,
-      start: from / SAMPLE_RATE,
-      duration: (to - from) / SAMPLE_RATE,
+    pipeline = new TranscriptionPipeline(engine, {
+      onSegment: (seg) => post({ type: 'segment', ...seg }),
+      onPartial: (p) => post({ type: 'partial', text: p.text }),
     });
-  }
-
-  transcribe(samples) {
-    const stream = recognizer.createStream();
-    stream.acceptWaveform(SAMPLE_RATE, samples);
-    recognizer.decode(stream);
-    const result = recognizer.getResult(stream);
-    stream.free();
-    return {
-      text: cleanAsrText(result.text || ''),
-      // SenseVoice 的语言标记形如 <|zh|>；getResult 的 JSON 字段名为 lang。
-      lang: (result.lang || '').replace(/[<|>]/g, ''),
-    };
-  }
-}
-
-// ===== init：加载 WASM 胶水 + 写入模型 + 建管线 =====
-function loadGlue(baseUrl) {
-  return new Promise((resolve, reject) => {
-    // baseUrl 形如 `${origin}${BASE_PATH}sherpa/`，三个脚本都在该目录下。
-    const M = {
-      locateFile: (path) => baseUrl + path, // 让 .wasm/.data 从 sherpa/ 目录加载
-      onRuntimeInitialized: () => resolve(M),
-    };
-    // 暴露为全局，供胶水脚本读取/写入（胶水的 `var Module` 会复用它）。
-    self.Module = M;
-    try {
-      // 包装器（定义 createVad / OfflineRecognizer / CircularBuffer 等全局），再加载胶水。
-      importScripts(baseUrl + 'sherpa-onnx-vad.js');
-      importScripts(baseUrl + 'sherpa-onnx-asr.js');
-      importScripts(baseUrl + 'sherpa-onnx-wasm-main-vad-asr.js');
-    } catch (e) {
-      reject(e);
-    }
-  });
-}
-
-async function handleInit(msg) {
-  try {
-    const M = await loadGlue(msg.sherpaBaseUrl);
-    // 把模型字节写入 WASM MEMFS（扁平文件名，recognizer/VAD 用 './<name>' 引用）。
-    for (const { name, bytes } of msg.models) {
-      M.FS.writeFile(name, bytes);
-    }
-    pipeline = new TranscriptionPipeline();
     post({ type: 'ready' });
     // 排空 init 前积压的帧。
     const queued = frameQueue;
@@ -379,6 +182,12 @@ self.onmessage = (ev) => {
           /* ignore */
         }
       }
+      // 回执：flush 定稿的最后一段 segment 已按消息顺序先行送达。
+      post({ type: 'flushed' });
+      break;
+    case 'reset':
+      // 新一次录音会话：worker/模型复用，只重置计时基线与跨会话残留。
+      pipeline?.reset();
       break;
     case 'stop':
       try {
@@ -391,7 +200,6 @@ self.onmessage = (ev) => {
       recognizer = null;
       pipeline = null;
       frameQueue = [];
-      // 回执：主线程收到后才 terminate（确保上面 flush 回吐的最后一段已送达）。
       post({ type: 'stopped' });
       break;
     default:

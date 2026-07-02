@@ -6,6 +6,9 @@ export * from './ports';
 export * from './bridge';
 export * from './models';
 
+// ASR 实时转写管线（切段策略 + 文本清理；推理引擎由各端注入）
+export * from './asr/transcription-pipeline';
+
 // 翻译
 export * from './translation/translator';
 export * from './translation/cloud-translator';

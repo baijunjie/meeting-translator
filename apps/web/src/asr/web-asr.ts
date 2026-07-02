@@ -1,14 +1,17 @@
-// Web ASR 执行层（Phase 2 = 真识别）。
+// Web ASR 执行层。
 //
 // 这是桥接 (../bridge.ts) 调用的统一接口：start() 起一条「采麦 → 16kHz 单声道 PCM → sherpa-onnx
-// WASM（Silero VAD + SenseVoice）」的实时识别管线，stop() 拆除。
+// WASM（Silero VAD + SenseVoice）」的实时识别管线，stop() 拆除音频通路。
 //
 // 架构：
 //  - 采麦：getUserMedia + AudioContext(16k) + AudioWorklet（见 ./pcm-worklet.js），每 100ms 一帧。
-//  - 识别：放在经典 Web Worker（./sherpa-worker.ts，importScripts 加载 Emscripten 胶水）里跑，
-//    主线程只负责把帧 postMessage 过去，避免 WASM 解码阻塞 UI。
-//  - 模型：start 前确保 @rt/core ASR_MODELS 已下载并缓存（Cache Storage），再把字节传给 Worker
-//    写入 WASM FS（见 ./model-store.ts）。
+//  - 识别：放在 module Web Worker（./sherpa-worker.ts）里跑，切段策略在 @rt/core、
+//    WASM 引擎适配在 worker 内；主线程只负责把帧 postMessage 过去，避免 WASM 解码阻塞 UI。
+//  - 模型：首次 start 前确保 @rt/core ASR_MODELS 已下载并缓存（Cache Storage），把字节传给
+//    Worker 写入 WASM FS（见 ./model-store.ts）。
+//  - 复用：worker 跨录音会话常驻（stop 只 flush、不 terminate），模型留在 WASM FS 里，
+//    再次 start 只发 reset 重置计时基线——省去重读 ~230MB 模型字节与重新构图预热。
+//    worker 报过错则下次 start 前丢弃重建，避免带病复用。
 //  - 回吐：Worker 的 partial/segment 消息转成 @rt/core 的 PartialPayload/SegmentPayload，
 //    经 onPartial/onSegment 回调上抛。
 
@@ -31,7 +34,7 @@ export interface WebAsrStartResult {
 }
 
 /**
- * 浏览器端实时 ASR 管线（Phase 2）：真采麦 + sherpa-onnx WASM 识别。
+ * 浏览器端实时 ASR 管线：真采麦 + sherpa-onnx WASM 识别。
  * 平台特定的接缝（音频通路、WASM Worker、模型加载、回调）都收敛在这里，桥接只调 start/stop。
  */
 export class WebAsr {
@@ -42,6 +45,8 @@ export class WebAsr {
   private worklet: AudioWorkletNode | null = null;
   private worker: Worker | null = null;
   private workerReady = false;
+  // worker 报过错（init 失败 / 解码异常）：不再复用，下次 start 前 terminate 重建
+  private workerFailed = false;
   private running = false;
 
   constructor(cbs: WebAsrCallbacks = {}) {
@@ -63,7 +68,15 @@ export class WebAsr {
     return new URL(`${base}sherpa/`, self.location.origin).toString();
   }
 
-  /** 起识别 Worker：等模型缓存就绪 → 取字节 → 建 Worker → init（写 FS + 建 VAD/recognizer）。 */
+  /** 丢弃当前 worker（异常路径 / 带病状态），下次 start 走冷启动重建。 */
+  private discardWorker(): void {
+    this.worker?.terminate();
+    this.worker = null;
+    this.workerReady = false;
+    this.workerFailed = false;
+  }
+
+  /** 冷启动识别 Worker：等模型缓存就绪 → 取字节 → 建 Worker → init（写 FS + 建 VAD/recognizer）。 */
   private async startWorker(): Promise<void> {
     // 确保模型已缓存（正常路径下 SetupScreen 已先下过；这里兜底，命中即秒回）。
     if (!(await areModelsCached())) {
@@ -71,10 +84,10 @@ export class WebAsr {
     }
     const models = await readCachedModels();
 
-    // 经典 Worker：sherpa 胶水用 importScripts，必须 type:'classic'。
-    // Vite 会把 ./sherpa-worker.ts 单独打成 worker 资源。
+    // module worker：worker 内 import @rt/core（Vite dev 原生 ESM / build 打包）；
+    // sherpa 胶水是 classic 全局脚本，由 worker 内部 fetch+eval 加载（见 sherpa-worker 头注）。
     this.worker = new Worker(new URL('./sherpa-worker.ts', import.meta.url), {
-      type: 'classic',
+      type: 'module',
     });
 
     const ready = new Promise<void>((resolve, reject) => {
@@ -99,12 +112,17 @@ export class WebAsr {
             });
             break;
           case 'error':
+            this.workerFailed = true;
             if (!this.workerReady) reject(new Error(msg.error));
             this.cbs.onStatus?.({ state: 'error', error: msg.error });
+            break;
+          // 'flushed' / 'stopped' 由 stop() 里的临时监听消费，这里无需处理。
+          default:
             break;
         }
       };
       w.onerror = (e) => {
+        this.workerFailed = true;
         if (!this.workerReady) reject(new Error(e.message || 'sherpa worker 加载失败'));
       };
     });
@@ -121,13 +139,21 @@ export class WebAsr {
     await ready;
   }
 
-  /** 起管线：请求麦克风 → 16kHz AudioContext → AudioWorklet → sherpa Worker。 */
+  /** 起管线：请求麦克风 → 16kHz AudioContext → AudioWorklet → sherpa Worker（复用或冷启动）。 */
   async start(): Promise<WebAsrStartResult> {
     if (this.running) return { ok: true };
     this.cbs.onStatus?.({ state: 'loading' });
     try {
-      // 先把识别 Worker 拉起来（含模型加载）。任何一步失败都不进入 running。
-      await this.startWorker();
+      if (this.worker && this.workerFailed) {
+        this.discardWorker();
+      }
+      if (this.worker && this.workerReady) {
+        // 复用常驻 worker：模型仍在 WASM FS，只需重置会话计时基线，秒级恢复。
+        this.worker.postMessage({ type: 'reset' } satisfies ToWorker);
+      } else {
+        // 冷启动（含模型加载）。任何一步失败都不进入 running。
+        await this.startWorker();
+      }
 
       // 真请求麦克风（触发浏览器权限弹窗）。仅音频。
       this.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -164,7 +190,7 @@ export class WebAsr {
     }
   }
 
-  /** 拆除管线，释放麦克风 + Worker。 */
+  /** 停止会话：拆音频通路 + flush 定稿最后一段；worker 保留供下次复用。 */
   async stop(): Promise<{ ok: boolean }> {
     this.running = false;
     try {
@@ -185,32 +211,31 @@ export class WebAsr {
         for (const track of this.stream.getTracks()) track.stop();
         this.stream = null;
       }
+
       const w = this.worker;
-      const wasReady = this.workerReady;
-      this.worker = null;
-      this.workerReady = false;
       if (w) {
-        if (wasReady) {
-          // flush 把未闭合段定稿并回吐最后一段 segment；stop 释放后回 'stopped'。
-          // 必须等 'stopped'（或超时兜底）再 terminate —— 同步 terminate 会在 worker
-          // 处理 flush 前杀掉它，导致停止瞬间正在说的那句永远丢失。
+        if (this.workerReady && !this.workerFailed) {
+          // flush 把未闭合段定稿并回吐最后一段 segment（先于 'flushed' 回执到达），
+          // 等回执（或超时兜底）后保留 worker——模型常驻，下次 start 秒级恢复。
           await new Promise<void>((resolve) => {
             let done = false;
             const finish = (): void => {
               if (done) return;
               done = true;
-              w.terminate();
+              w.removeEventListener('message', onMsg);
+              clearTimeout(timer);
               resolve();
             };
-            w.addEventListener('message', (ev: MessageEvent) => {
-              if ((ev.data as FromWorker | undefined)?.type === 'stopped') finish();
-            });
+            const onMsg = (ev: MessageEvent): void => {
+              if ((ev.data as FromWorker | undefined)?.type === 'flushed') finish();
+            };
+            w.addEventListener('message', onMsg);
+            const timer = setTimeout(finish, 3000); // 兜底：worker 异常时也不挂起
             w.postMessage({ type: 'flush' } satisfies ToWorker);
-            w.postMessage({ type: 'stop' } satisfies ToWorker);
-            setTimeout(finish, 3000); // 兜底：worker 异常时也不挂起
           });
         } else {
-          w.terminate();
+          // 初始化未完成 / 报过错：不值得保留，直接丢弃，下次冷启动重建。
+          this.discardWorker();
         }
       }
     } finally {
