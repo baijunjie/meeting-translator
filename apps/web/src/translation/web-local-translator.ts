@@ -32,9 +32,27 @@ export class WebLocalTranslator {
     return this.spec.langs[lang ?? ''] ?? this.spec.langs[this.spec.fallbackLang];
   }
 
+  /**
+   * worker 脚本加载失败 / 推理崩溃（如 OOM）：worker 已无法再回执任何消息，兜底 settle
+   * 所有等待方——拒绝在途 pending 与预热、复位状态，并丢弃这个 worker 以便下次冷启动重建。
+   */
+  private failWorker(error: Error): void {
+    for (const p of this.pending.values()) p.reject(error);
+    this.pending.clear();
+    this.warmReject?.(error);
+    this.warmResolve = null;
+    this.warmReject = null;
+    this.warming = null;
+    this.worker?.terminate();
+    this.worker = null;
+  }
+
   private ensureWorker(): Worker {
     if (this.worker) return this.worker;
     const w = new Worker(new URL('./translate-worker.ts', import.meta.url), { type: 'module' });
+    // worker 级致命错误无法经协议消息上报（脚本加载失败 / 运行时崩溃），单独兜底。
+    w.onerror = (e: ErrorEvent) => this.failWorker(new Error(e.message || '翻译 worker 崩溃'));
+    w.onmessageerror = () => this.failWorker(new Error('翻译 worker 消息反序列化失败'));
     w.onmessage = (ev: MessageEvent<FromTranslateWorker>) => {
       const m = ev.data;
       switch (m.type) {
@@ -97,7 +115,7 @@ export class WebLocalTranslator {
   /**
    * 把 text 翻成 target（短码 zh/en/ja/ko/yue），经 M2M100 语言码映射。
    * 目标若需脚本后处理（M2M100 只有一个 'zh'，繁體靠脚本转换）则套 toScript。
-   * onProgress 透传 worker 的模型下载进度（首次会下载 ~400MB）。
+   * onProgress 透传 worker 的模型下载进度（首次会下载 ~630MB）。
    */
   async translate(
     text: string,

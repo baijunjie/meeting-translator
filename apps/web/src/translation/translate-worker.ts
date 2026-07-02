@@ -32,9 +32,15 @@ function ensure(modelId: string, dtype: 'q8'): Promise<void> {
       // ORT-web 扩展图优化在该 q8 模型上会崩，关掉直接跑原始 QDQ 算子（详见 web-local-translator）。
       session_options: { graphOptimizationLevel: 'disabled' },
       progress_callback: (p: unknown) => post({ type: 'progress', progress: p }),
-    }).then((fn) => {
-      translate$ = fn as unknown as TranslationFn;
-    });
+    })
+      .then((fn) => {
+        translate$ = fn as unknown as TranslationFn;
+      })
+      .catch((e) => {
+        // 加载失败复位，允许后续 init/translate 重试；否则缓存的 rejected promise 会永久拒绝。
+        loading = null;
+        throw e;
+      });
   }
   return loading;
 }

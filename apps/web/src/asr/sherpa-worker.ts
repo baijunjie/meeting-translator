@@ -58,8 +58,11 @@ async function loadGlue(baseUrl) {
   const M = {
     locateFile: (path) => baseUrl + path, // 让 .wasm/.data 从 sherpa/ 目录加载
   };
-  const ready = new Promise((resolve) => {
+  const ready = new Promise((resolve, reject) => {
     M.onRuntimeInitialized = () => resolve();
+    // wasm 取不到（404/离线）或实例化失败时 Emscripten 会 abort：转成 reject，
+    // 否则运行时永不初始化、ready 永久 pending，主线程 start() 随之永久挂起。
+    M.onAbort = (reason) => reject(new Error(`sherpa WASM 加载失败: ${reason ?? 'abort'}`));
   });
   self.Module = M;
   await importClassicScript(baseUrl + 'sherpa-onnx-vad.js', ['createVad', 'CircularBuffer']);
