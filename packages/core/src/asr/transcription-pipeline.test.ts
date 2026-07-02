@@ -111,6 +111,29 @@ describe('TranscriptionPipeline 切段', () => {
     expect(seg2.id).toBe(1);
   });
 
+  it('说话中途未 flush 直接 reset：丢弃未闭合段，新会话段 start ≥ 0 且不跨会话', () => {
+    const h = makeHarness();
+    h.feed(1.0, false); // 静音
+    h.feed(2.0, true); // 说话中，尚未静音断句，段仍未闭合
+    expect(h.segments).toHaveLength(0);
+
+    // stop/start 交错时 reset 可能先于 flush 到达：未 flush 直接 reset
+    h.pipeline.reset();
+
+    // 继续喂新会话音频并正常断句
+    h.feed(0.5, false);
+    h.feed(1.5, true);
+    h.feed(0.5, false);
+
+    // 只产出新会话的一段，旧的未闭合段被丢弃（未定稿成跨会话段）
+    expect(h.segments).toHaveLength(1);
+    const seg = h.segments[0];
+    // 新会话段从会话起点计，start 不为负、不叠加上一会话音频时长
+    expect(seg.start).toBeGreaterThanOrEqual(0);
+    expect(seg.start).toBeLessThan(1.0);
+    expect(seg.id).toBe(0);
+  });
+
   it('连续语音超过上限时在能量最低点兜底断句', () => {
     const h = makeHarness();
     h.engine.result = { text: 'test speech', lang: '<|en|>' };

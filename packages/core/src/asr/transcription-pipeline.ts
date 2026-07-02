@@ -215,13 +215,21 @@ export class TranscriptionPipeline {
     this.onPartial({ text: '' });
   }
 
-  /** 开始新一次录音会话：计时基线重置为当前采样位置，segment.start 自此从 0 计 */
+  /**
+   * 开始新一次录音会话：计时基线重置为当前采样位置，segment.start 自此从 0 计。
+   * 会丢弃上一会话未闭合的语音段状态，确保 reset 后不再定稿出跨会话或负时间戳的段。
+   */
   reset(): void {
     this.sessionBase = this.totalSamples;
     // 上一会话的音频全部视为已定稿：句首回看与部分识别都不会跨进上一会话的尾音
     this.partialFloor = this.totalSamples;
     // 丢弃上一会话残留的不足一个 VAD 窗口的样本，避免跨会话串音
     this.pending = new Float32Array(0);
+    // 丢弃上一会话未闭合的语音段：切段状态对齐到当前位置。否则旧段随后定稿时
+    // segStart < sessionBase 会算出负的 start，且音频跨越两次会话。
+    this.speechActive = false;
+    this.segStart = this.totalSamples;
+    this.speechEnd = this.totalSamples;
   }
 
   /**
