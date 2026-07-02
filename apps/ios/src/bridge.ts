@@ -49,8 +49,8 @@ import type {
 } from '@rt/core';
 import { RealtimeAsr, RealtimeTranslate } from '../native-plugin';
 
-const SETTINGS_KEY = 'mt.settings';
-const ARCHIVES_KEY = 'mt.archives';
+const SETTINGS_KEY = 'realtime-translator.settings';
+const ARCHIVES_KEY = 'realtime-translator.archives';
 
 export function createIosBridge(): AppBridge {
   // —— UI 注册的回调（mountApp → registerTranscriptionListeners 时注入） ——
