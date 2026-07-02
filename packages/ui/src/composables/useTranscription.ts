@@ -1,4 +1,5 @@
 import { nextTick, reactive, ref } from 'vue';
+import type { TranslationFileProgress } from '@rt/core';
 import { fmtClock } from '../utils/datetime';
 import { bridge } from '../bridge';
 
@@ -24,10 +25,16 @@ export const errorText = ref('');
 export const translationLoading = ref(false);
 export const translationDownloading = ref(false); // true=首次下载(有进度)，false=载入内存
 export const translationProgress = ref(0); // 0~100
+// 各文件独立下载进度（下载页逐文件展示进度条），仅 loading 阶段有值，ready/error 清空
+export const translationFiles = ref<TranslationFileProgress[]>([]);
 export const translationError = ref(false);
 
 // 录音开始时的本地时刻（epoch ms），用于把片段的相对偏移换算成本地时钟时间
 let recordStartEpoch = 0;
+
+// 录音开关在途守卫：start/stop 尚未 await 完成时忽略新的切换请求，
+// 消除 stop 进行中被并发 start（或反之）拆掉会话音频通路的窗口期。
+let toggleBusy = false;
 
 // 把片段相对录音起点的偏移（秒）换算成本地时钟时间 HH:MM:SS
 function fmtTime(offsetSeconds: number): string {
@@ -83,9 +90,18 @@ export function registerTranscriptionListeners(): void {
     } else if (s.state === 'error') {
       modelLoading.value = false;
       errorText.value = s.error ?? 'Error';
-      if (recording.value) void stopRecording();
+      // 经守卫收停：stopPipeline 在途期间用户点录音会被 toggleBusy 挡住，避免 start/stop 交错
+      if (recording.value) {
+        toggleBusy = true;
+        void stopRecording().finally(() => {
+          toggleBusy = false;
+        });
+      }
     } else if (s.state === 'stopped') {
       modelLoading.value = false;
+      // 管线可能在宿主侧结束（如 iOS 来电/拔耳机等系统音频中断），同步 UI 回到停止态；
+      // 用户主动停止时 recording 已为 false，重复赋值无副作用。
+      recording.value = false;
     }
   });
   bridge().onTranslationStatus((s) => {
@@ -97,28 +113,33 @@ export function registerTranscriptionListeners(): void {
         translationDownloading.value = true;
         translationProgress.value = Math.round(s.progress * 100);
       }
+      if (s.files) translationFiles.value = s.files;
     } else if (s.state === 'error') {
       translationLoading.value = false;
       translationDownloading.value = false;
+      translationFiles.value = [];
       translationError.value = true;
       // 翻译失败（含子进程崩溃）：结束所有仍在等待的译文动画，避免永久转圈
       for (const l of lines) l.translating = false;
     } else if (s.state === 'ready') {
       translationLoading.value = false;
       translationDownloading.value = false;
+      translationFiles.value = [];
     }
   });
 }
 
 export async function startRecording(): Promise<void> {
   errorText.value = '';
-  recordStartEpoch = Date.now();
   // 桥接内部负责音频采集（macOS 渲染层用 AudioWorklet，iOS 原生采麦），UI 不感知平台细节。
   const result = await bridge().startPipeline();
   if (!result.ok) {
     errorText.value = result.error ?? 'Error';
     return;
   }
+  // 计时基线在管线确认启动后才取：segment.start 的 0 点是管线启动之后，
+  // 首次录音需加载模型耗时数秒，若在 await 前取值会让所有行的时钟偏早整个加载时长。
+  recordStartEpoch = Date.now();
   recording.value = true;
 }
 
@@ -129,11 +150,13 @@ export async function stopRecording(): Promise<void> {
 }
 
 export function toggleRecording(): void {
-  if (recording.value) {
-    void stopRecording();
-  } else {
-    void startRecording();
-  }
+  // 上一次切换（含 onStatus error 分支触发的收停）尚在途时忽略本次点击，避免 start/stop 交错并发。
+  if (toggleBusy) return;
+  toggleBusy = true;
+  const action = recording.value ? stopRecording() : startRecording();
+  void action.finally(() => {
+    toggleBusy = false;
+  });
 }
 
 /** 清空转写历史 */
