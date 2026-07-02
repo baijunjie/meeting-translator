@@ -12,6 +12,7 @@ import {
   modelLoading,
   errorText,
   errorCode,
+  recordBusy,
   toggleRecording,
   clearTranscript,
   translationLoading,
@@ -137,6 +138,8 @@ const showMicModal = computed({
 
 // 录音按钮：停止无需权限；开始前先查权限——未决先弹说明再触发系统授权，已拒绝则引导去设置
 async function onRecordClick(): Promise<void> {
+  // 启停在途（含入口处的模型/权限异步检查窗口）一律忽略，按钮同时也已禁用
+  if (recordBusy.value) return;
   if (recording.value) {
     toggleRecording();
     return;
@@ -204,7 +207,12 @@ function openMicSettings(): void {
         <n-button quaternary circle :title="t('main.settings')" @click="$emit('open-settings')">
           <template #icon><Settings :size="18" /></template>
         </n-button>
-        <n-button :type="recording ? 'error' : 'primary'" :disabled="preparing" @click="onRecordClick">
+        <n-button
+          :type="recording ? 'error' : 'primary'"
+          :disabled="preparing || recordBusy"
+          :loading="recordBusy"
+          @click="onRecordClick"
+        >
           {{ recording ? t('main.stop') : t('main.start') }}
         </n-button>
       </div>
@@ -302,11 +310,12 @@ function openMicSettings(): void {
       class="fixed left-1/2 z-20 flex h-16 w-16 -translate-x-1/2 items-center justify-center rounded-full text-white shadow-lg transition-colors disabled:opacity-40 sm:hidden"
       :class="recording ? 'bg-red-500 active:bg-red-600' : 'bg-emerald-500 active:bg-emerald-600'"
       :style="{ bottom: 'calc(env(safe-area-inset-bottom) + 22px)' }"
-      :disabled="preparing"
+      :disabled="preparing || recordBusy"
       :title="recording ? t('main.stop') : t('main.start')"
       @click="onRecordClick"
     >
-      <component :is="recording ? Square : Mic" :size="26" :fill="recording ? 'currentColor' : 'none'" />
+      <LoaderCircle v-if="recordBusy" :size="26" class="animate-spin" />
+      <component v-else :is="recording ? Square : Mic" :size="26" :fill="recording ? 'currentColor' : 'none'" />
     </button>
   </div>
 </template>

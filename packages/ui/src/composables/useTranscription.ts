@@ -33,9 +33,10 @@ export const translationError = ref(false);
 // 录音开始时的本地时刻（epoch ms），用于把片段的相对偏移换算成本地时钟时间
 let recordStartEpoch = 0;
 
-// 录音开关在途守卫：start/stop 尚未 await 完成时忽略新的切换请求，
-// 消除 stop 进行中被并发 start（或反之）拆掉会话音频通路的窗口期。
-let toggleBusy = false;
+// 录音开关在途状态：start/stop 尚未 await 完成时为真——既作并发守卫（忽略新的切换请求，
+// 消除 stop 进行中被并发 start 拆掉音频通路的窗口期），也供 UI 禁用录音按钮并显示加载态
+// （启动含取麦克风等待，可达数秒，无反馈会让用户以为没点上而连点）。
+export const recordBusy = ref(false);
 
 // 把片段相对录音起点的偏移（秒）换算成本地时钟时间 HH:MM:SS
 function fmtTime(offsetSeconds: number): string {
@@ -93,11 +94,11 @@ export function registerTranscriptionListeners(): void {
       modelLoading.value = false;
       errorText.value = s.error ?? 'Error';
       errorCode.value = s.code ?? null;
-      // 经守卫收停：stopPipeline 在途期间用户点录音会被 toggleBusy 挡住，避免 start/stop 交错
+      // 经守卫收停：stopPipeline 在途期间用户点录音会被 recordBusy 挡住，避免 start/stop 交错
       if (recording.value) {
-        toggleBusy = true;
+        recordBusy.value = true;
         void stopRecording().finally(() => {
-          toggleBusy = false;
+          recordBusy.value = false;
         });
       }
     } else if (s.state === 'stopped') {
@@ -156,11 +157,11 @@ export async function stopRecording(): Promise<void> {
 
 export function toggleRecording(): void {
   // 上一次切换（含 onStatus error 分支触发的收停）尚在途时忽略本次点击，避免 start/stop 交错并发。
-  if (toggleBusy) return;
-  toggleBusy = true;
+  if (recordBusy.value) return;
+  recordBusy.value = true;
   const action = recording.value ? stopRecording() : startRecording();
   void action.finally(() => {
-    toggleBusy = false;
+    recordBusy.value = false;
   });
 }
 
